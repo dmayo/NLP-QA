@@ -13,12 +13,14 @@ from time import time
 torch.manual_seed(1)
 random.seed(1)
 
+USE_GPU = False
+
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
 
-BATCH_SIZE = 1
+BATCH_SIZE = 4
 EMBEDDING_DIM = 200
 LSTM_HIDDEN_DIM = 240
 NUM_TRAINING_SAMPLES = 22853
@@ -83,10 +85,28 @@ def get_tensor_from_batch(samples, use_title=True):
     all_question_lengths = np.vectorize(lambda x: len(d[x].split()))(samples.flatten())
     max_question_length = np.amax(all_question_lengths)
     tensor = torch.zeros([max_question_length, BATCH_SIZE * len(samples[0])])
+    if USE_GPU:
+        tensor = tensor.cuda()
     for q_index, q_id in enumerate(samples.flatten()):
         for word_index, word in enumerate(d[q_id].split()):
             tensor[word_index][q_index] = word_to_index[word]
     return Variable(tensor.long()), all_question_lengths
+
+# Given a set of hidden states in the LSTM, and given a list of the question lengths, calculates
+# the mean hidden state for every question.
+# lstm_out is of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
+def get_encodings(lstm_out, question_lengths):
+    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM))
+    # mean_hidden_state.requires_grad = True
+    for word_index in range(len(lstm_out)):
+        for q_index in range(len(lstm_out[0])):
+            if word_index < question_lengths[q_index]:
+                mean_hidden_state[q_index] = mean_hidden_state[q_index] + lstm_out[word_index][q_index]
+    for q_index in range(len(mean_hidden_state)):
+        mean_hidden_state[q_index] = mean_hidden_state[q_index] / question_lengths[q_index]
+    return mean_hidden_state
+
+# -------------------------- EVALUATION RELATED CODE ----------------------------------
 
 # Returns the dev data in a numpy array, where each dev sample is of the format (q_id, candidate_1, candidate_2, ..., candidate_20, 0)
 # Add an extra bogus question to keep this shape similar to the training data shape
@@ -107,46 +127,6 @@ def get_dev_data():
                 is_correct.append([True if cand_qid in similar_ids else False for cand_qid in candidate_qids])
     return np.array(dev_data), np.array(is_correct)
 
-# -------------------------- LSTM ----------------------------------
-
-class LSTMQA(nn.Module):
-    def __init__(self, hidden_dim, embedding_dim, pretrained_weight):
-        super(LSTMQA, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.embedding_dim = embedding_dim
-
-        self.embed = nn.Embedding(len(pretrained_weight), self.embedding_dim, padding_idx=-1)
-        self.embed.weight.data.copy_(torch.from_numpy(pretrained_weight))
-        # self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
-
-        self.lstm = nn.LSTM(self.embedding_dim, hidden_dim)
-        self.hidden = self.init_hidden()
-
-    def init_hidden(self):
-        # The axes semantics are (num_layers, minibatch_size, hidden_dim)
-        return (Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim)),
-                Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim)))
-
-    def forward(self, sentence):
-        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE)
-        # returns a list of all the hidden states
-        embeds = self.embed(sentence)
-        lstm_out, self.hidden = self.lstm(embeds, self.hidden)
-        return lstm_out
-
-# Given a set of hidden states in the LSTM, and given a list of the question lengths, calculates
-# the mean hidden state for every question.
-def get_encodings(lstm_out, question_lengths):
-    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM))
-    # mean_hidden_state.requires_grad = True
-    for word_index in range(len(lstm_out)):
-        for q_index in range(len(lstm_out[0])):
-            if word_index < question_lengths[q_index]:
-                mean_hidden_state[q_index] = mean_hidden_state[q_index] + lstm_out[word_index][q_index]
-    for q_index in range(len(mean_hidden_state)):
-        mean_hidden_state[q_index] = mean_hidden_state[q_index] / question_lengths[q_index]
-    return mean_hidden_state
-
 # Generates the matrix X of shape (BATCH_SIZE, 21), where X[i][j] gives the cosine similarity
 # between the main question i and the j-th question candidate, i.e. j=0 is the positive match and j=1~20 are the negative matches
 # Takes the average of the title encoding and the body encoding
@@ -157,40 +137,104 @@ def generate_score_matrix(title_encoding, body_encoding):
     # mean_hidden_state.requires_grad = True
 
     cos = nn.CosineSimilarity(dim=0)
-    X = Variable(torch.zeros(BATCH_SIZE, 21))
+    X = Variable(torch.zeros(BATCH_SIZE, 21).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE, 21))
     # X.requires_grad = True
     for i in range(BATCH_SIZE):
         for j in range(21):
             X[i, j] = cos(mean_hidden_state[22 * i], mean_hidden_state[22 * i + j + 1])
-    y = Variable(torch.zeros(BATCH_SIZE).long())
+    y = Variable(torch.zeros(BATCH_SIZE).long().cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE).long())
     # y.requires_grad = True
     return X, y
 
-# score_matrix is a shape (NUM_DEV_SAMPLES, 20) matrix that contains the cosine similarity scores
-# score_matrix[i][j] contains the similarity score between the i'th sample's main question and its j'th candidate question
-def evaluate_score_matrix(score_matrix):
-    map_total = 0
-    mrr_total = 0
-    p_at_1_total = 0
-    p_at_5_total = 0
-    # TODO later
+# In these functions, sorted_args and is_correct are for ONE SAMPLE ONLY - so both are 1D arrays of length 20
+def calculate_precision_at(sorted_args, is_correct, precision_value):
+    return 1. * sum([is_correct[index] for index in sorted_args[:precision_value]]) / precision_value
+def calculate_map(sorted_args, is_correct):
+    num_total_correct = sum(is_correct)
+    num_found, total = 0, 0
+    for i in range(20):
+        if is_correct[sorted_args[i]]:
+            num_found += 1
+            total += 1. * num_found / (i + 1)
+            if num_found == num_total_correct:
+                return total / num_total_correct
+def calculate_mrr(sorted_args, is_correct):
+    for i in range(20):
+        if is_correct[sorted_args[i]]:
+            return 1. / (i+1)
+    assert False # should never get here
 
+# score_matrix is a numpy array shape (NUM_DEV_SAMPLES, 20) matrix that contains the cosine similarity scores
+# score_matrix[i][j] contains the similarity score between the i'th sample's main question and its j'th candidate question
+# is_correct of the numpy array shape (NUM_DEV_SAMPLES, 20), where is_correct[i][j] indicates whether the j'th candidate
+# question for sample i is actually a similar question or not
+def evaluate_score_matrix_and_print(score_matrix, is_correct):
+    map_total, mrr_total, p_at_1_total, p_at_5_total = 0, 0, 0, 0
+    NUM_DEV_SAMPLES = len(score_matrix)
+    sorted_args = np.argsort(-score_matrix)
+    for i in range(NUM_DEV_SAMPLES):
+        map_total += calculate_map(sorted_args[i], is_correct[i])
+        mrr_total += calculate_mrr(sorted_args[i], is_correct[i])
+        p_at_1_total += calculate_precision_at(sorted_args[i], is_correct[i], 1)
+        p_at_5_total += calculate_precision_at(sorted_args[i], is_correct[i], 5)
+    print "MAP score is " + str(map_total / NUM_DEV_SAMPLES)
+    print "MRR score is " + str(mrr_total / NUM_DEV_SAMPLES)
+    print "P@1 score is " + str(p_at_1_total / NUM_DEV_SAMPLES)
+    print "P@5 score is " + str(p_at_5_total / NUM_DEV_SAMPLES)
+
+# -------------------------- LSTM ----------------------------------
+
+class LSTMQA(nn.Module):
+    def __init__(self, hidden_dim, embedding_dim, pretrained_weight):
+        super(LSTMQA, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.embedding_dim = embedding_dim
+
+        self.embed = nn.Embedding(len(pretrained_weight), self.embedding_dim, padding_idx=-1)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda() if USE_GPU else torch.from_numpy(pretrained_weight)
+        self.embed.weight.data.copy_(pretrained_weight)
+        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
+
+        self.lstm = nn.LSTM(self.embedding_dim, hidden_dim)
+        self.hidden = self.init_hidden()
+
+    def init_hidden(self):
+        # The axes semantics are (num_layers, minibatch_size, hidden_dim)
+        if USE_GPU:
+            return (Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim).cuda()), Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim).cuda()))
+        else:
+            return (Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim)), Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim)))
+
+    def forward(self, sentence):
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE)
+        # returns a list of all the hidden states
+        embeds = self.embed(sentence)
+        lstm_out, self.hidden = self.lstm(embeds, self.hidden)
+        return lstm_out
+
+# Actually trains this thing
 def train_LSTM():
     get_id_to_text()
     embeddings = get_word_embeddings()
     model = LSTMQA(LSTM_HIDDEN_DIM, EMBEDDING_DIM, embeddings)
+    if USE_GPU:
+        model.cuda()
     loss_function = nn.MultiMarginLoss(margin=0.2) # TODO: what about size_average?
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
     orig_time = time()
 
-    num_batches = int(math.ceil(1. * NUM_TRAINING_SAMPLES / BATCH_SIZE)) # TODO: what about the last batch where it's not full?
+    num_batches = int(math.ceil(1. * NUM_TRAINING_SAMPLES / BATCH_SIZE))
     for epoch in range(NUM_EPOCHS):
         samples = get_training_data() # recalculate this every epoch to get new random selections
-        
         for i in range(num_batches):
             # Get the samples ready
             batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
+            # If this is the last batch, then need to pad the batch to get the same shape as expected
+            if i == num_batches - 1 and NUM_TRAINING_SAMPLES % BATCH_SIZE != 0:
+                batch = np.concatenate((batch, np.zeros(((i+1) * BATCH_SIZE - NUM_TRAINING_SAMPLES, 22))), axis=0)
+
+            # Convert from numpy arrays to tensors
             title_tensor, title_lengths = get_tensor_from_batch(batch, use_title=True)
             body_tensor, body_lengths = get_tensor_from_batch(batch, use_title=False)
 
@@ -204,25 +248,31 @@ def train_LSTM():
             model.hidden = model.init_hidden()
             body_lstm = model(body_tensor)
             body_encoding = get_encodings(body_lstm, body_lengths)
-
             # Compute loss, gradients, update parameters
+            # Could potentially do something about the last batch, but prolly won't affect training that much
             X, y = generate_score_matrix(title_encoding, body_encoding)
             loss = loss_function(X, y)
             loss.backward()
             optimizer.step()
 
-            print "For batch number " + str(i) + " it has taken " + str(time() - orig_time) + " seconds"
+            print "For batch number " + str(i) + " out of " + str(num_batches) + " it has taken " + str(time() - orig_time) + " seconds"
     return model
 
+# Evaluates the model on the dev set data
 def evaluate_LSTM(model):
     # samples has shape (num_dev_samples, 22), and is_correct has shape (num_dev_samples, 20)
     samples, is_correct = get_dev_data()
 
-    num_batches = int(math.ceil(1. * NUM_DEV_SAMPLES / BATCH_SIZE)) # TODO: what about the last batch where it's not full?
-    score_matrix = torch.Tensor()
+    num_batches = int(math.ceil(1. * NUM_DEV_SAMPLES / BATCH_SIZE))
+    score_matrix = torch.Tensor().cuda() if USE_GPU else torch.Tensor()
     for i in range(num_batches):
         # Get the samples ready
         batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
+        # If this is the last batch, then need to pad the batch to get the same shape as expected
+        if i == num_batches - 1 and NUM_DEV_SAMPLES % BATCH_SIZE != 0:
+            batch = np.concatenate((batch, np.full(((i+1) * BATCH_SIZE - NUM_DEV_SAMPLES, 22), "0")), axis=0)
+
+        # Convert from numpy arrays to tensors
         title_tensor, title_lengths = get_tensor_from_batch(batch, use_title=True)
         body_tensor, body_lengths = get_tensor_from_batch(batch, use_title=False)
 
@@ -237,14 +287,16 @@ def evaluate_LSTM(model):
         # Compute evaluation
         X, _ = generate_score_matrix(title_encoding, body_encoding)
         X = torch.index_select(X.data, 1, torch.arange(0, 20).long()) # convert to tensor, throw out last bogus question
-        score_matrix = torch.cat([score_matrix, X])
+        if i == num_batches - 1 and NUM_DEV_SAMPLES % BATCH_SIZE != 0:
+            score_matrix = torch.cat([score_matrix, X[:NUM_DEV_SAMPLES - i * BATCH_SIZE]])
+        else:
+            score_matrix = torch.cat([score_matrix, X])
 
     # score_matrix is a shape (num_dev_samples, 20) matrix that contains the cosine similarity scores
-    evaluate_score_matrix(score_matrix)
+    evaluate_score_matrix_and_print(score_matrix.numpy(), is_correct)
 
 if __name__ == '__main__':
     # Train LSTM
     model = train_LSTM()
-    # evaluate_LSTM(model)
-    # get_dev_data()
+    evaluate_LSTM(model)
 
