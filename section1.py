@@ -13,14 +13,14 @@ from time import time
 torch.manual_seed(1)
 random.seed(1)
 
-USE_GPU = False
+USE_GPU = True
 
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
 
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 EMBEDDING_DIM = 200
 LSTM_HIDDEN_DIM = 240
 NUM_TRAINING_SAMPLES = 22853
@@ -76,7 +76,7 @@ def get_training_data():
 
 # Flatten the list of questions (main_q, +, -), (main_q, +, -), ... into a single list
 # We use BATCH_SIZE samples in a single batch, so this equates ot BATCH_SIZE * 22 questions in a single batch
-# Inputs to the neural net are of the shape (max_question_length x batch_size), where batch_size = BATCH_SIZE * 22
+# Inputs to the neural net are of the shape (max_question_length x BATCH_SIZE * 22)
 # Pad missing questions with the 0 index (which corresponds to PAD or UNK)
 # PARAMETERS: a list of BATCH_SIZE training samples, where each training sample is of the format (q_id, pos_match, neg_match1, neg_match2, ...)
 # RETURNS: a Variable that we feed into the neural net, AND returns the numpy array of all question lengths (of length BATCH_SIZE * 22)
@@ -103,7 +103,8 @@ def get_encodings(lstm_out, question_lengths):
             if word_index < question_lengths[q_index]:
                 mean_hidden_state[q_index] = mean_hidden_state[q_index] + lstm_out[word_index][q_index]
     for q_index in range(len(mean_hidden_state)):
-        mean_hidden_state[q_index] = mean_hidden_state[q_index] / question_lengths[q_index]
+        if question_lengths[q_index] != 0:
+            mean_hidden_state[q_index] = mean_hidden_state[q_index] / question_lengths[q_index]
     return mean_hidden_state
 
 # -------------------------- EVALUATION RELATED CODE ----------------------------------
@@ -227,6 +228,7 @@ def train_LSTM():
     num_batches = int(math.ceil(1. * NUM_TRAINING_SAMPLES / BATCH_SIZE))
     for epoch in range(NUM_EPOCHS):
         samples = get_training_data() # recalculate this every epoch to get new random selections
+        total_loss = 0 # used for debugging only
         for i in range(num_batches):
             # Get the samples ready
             batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
@@ -252,10 +254,15 @@ def train_LSTM():
             # Could potentially do something about the last batch, but prolly won't affect training that much
             X, y = generate_score_matrix(title_encoding, body_encoding)
             loss = loss_function(X, y)
+            total_loss += loss.data[0]
             loss.backward()
             optimizer.step()
 
-            print "For batch number " + str(i) + " out of " + str(num_batches) + " it has taken " + str(time() - orig_time) + " seconds"
+            # every 100 batches, take a break and check the dev accuracy
+            if i % 5 == 0:
+                print "For batch number " + str(i) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss / (i+1))
+            if i % 50 == 0:
+                evaluate_LSTM(model)
     return model
 
 # Evaluates the model on the dev set data
@@ -286,14 +293,14 @@ def evaluate_LSTM(model):
 
         # Compute evaluation
         X, _ = generate_score_matrix(title_encoding, body_encoding)
-        X = torch.index_select(X.data, 1, torch.arange(0, 20).long()) # convert to tensor, throw out last bogus question
+        X = torch.index_select(X.data, 1, torch.arange(0, 20).long().cuda() if USE_GPU else torch.arange(0,20).long()) # convert to tensor, throw out last bogus question
         if i == num_batches - 1 and NUM_DEV_SAMPLES % BATCH_SIZE != 0:
             score_matrix = torch.cat([score_matrix, X[:NUM_DEV_SAMPLES - i * BATCH_SIZE]])
         else:
             score_matrix = torch.cat([score_matrix, X])
 
     # score_matrix is a shape (num_dev_samples, 20) matrix that contains the cosine similarity scores
-    evaluate_score_matrix_and_print(score_matrix.numpy(), is_correct)
+    evaluate_score_matrix_and_print(score_matrix.cpu().numpy(), is_correct)
 
 if __name__ == '__main__':
     # Train LSTM
