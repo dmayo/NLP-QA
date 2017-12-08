@@ -19,8 +19,9 @@ TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
+TEST_FILEPATH = "askubuntu/test.txt"
 
-BATCH_SIZE = 8
+BATCH_SIZE = 20
 EMBEDDING_DIM = 200
 LSTM_HIDDEN_DIM = 240
 NUM_TRAINING_SAMPLES = 22853
@@ -28,7 +29,7 @@ NUM_DEV_SAMPLES = 189
 
 LEARNING_RATE = 6e-4 # might change later
 WEIGHT_DECAY = 1e-5 # are we supposed to use this?
-NUM_EPOCHS = 1
+NUM_EPOCHS = 15
 
 # -------------------------- DATA INPUT + PROCESSING ----------------------------------
 
@@ -95,16 +96,23 @@ def get_tensor_from_batch(samples, use_title=True):
 # Given a set of hidden states in the LSTM, and given a list of the question lengths, calculates
 # the mean hidden state for every question.
 # lstm_out is of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
+# question_lengths is a simple numpy array of length (BATCH_SIZE * 22)
 def get_encodings(lstm_out, question_lengths):
+    # changes the dimensions to shape (BATCH_SIZE * 22, max_question_length, LSTM_HIDDEN_DIM)
+    lstm_out = lstm_out.permute(1, 0, 2)
+    # Generate a mask of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
+    mask = torch.zeros(BATCH_SIZE * 22, len(lstm_out[0]), LSTM_HIDDEN_DIM).cuda() if USE_GPU else torch.zeros(BATCH_SIZE * 22, len(lstm_out[0]), LSTM_HIDDEN_DIM)
+    for q_index in range(len(question_lengths)):
+        length = question_lengths[q_index]
+        if length != 0:
+            mask[q_index][:length] = torch.ones(length, LSTM_HIDDEN_DIM)
+    lstm_out = lstm_out * Variable(mask)
+
     mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM))
     # mean_hidden_state.requires_grad = True
-    for word_index in range(len(lstm_out)):
-        for q_index in range(len(lstm_out[0])):
-            if word_index < question_lengths[q_index]:
-                mean_hidden_state[q_index] = mean_hidden_state[q_index] + lstm_out[word_index][q_index]
-    for q_index in range(len(mean_hidden_state)):
+    for q_index in range(len(lstm_out)):
         if question_lengths[q_index] != 0:
-            mean_hidden_state[q_index] = mean_hidden_state[q_index] / question_lengths[q_index]
+            mean_hidden_state[q_index] = torch.sum(lstm_out[q_index], 0) / question_lengths[q_index]
     return mean_hidden_state
 
 # -------------------------- EVALUATION RELATED CODE ----------------------------------
@@ -115,10 +123,12 @@ def get_encodings(lstm_out, question_lengths):
 # Look at https://github.com/taolei87/askubuntu for some more info
 # Also returns a numpy array is_correct of the shape (num_dev_samples, 20), where is_correct[i][j] indicates whether the j'th candidate
 # question for sample i is actually a similar question or not
-def get_dev_data():
+# Can use the flag use_test_data to get data from the test filepath instead
+def get_dev_data(use_test_data=False):
     dev_data = []
     is_correct = []
-    with open(DEV_FILEPATH, 'r') as f:
+    filepath = TEST_FILEPATH if use_test_data else DEV_FILEPATH
+    with open(filepath, 'r') as f:
         for line in f.readlines():
             id, similar_ids, candidate_qids, _ = line.split('\t')
             similar_ids = similar_ids.split()
@@ -163,25 +173,25 @@ def calculate_mrr(sorted_args, is_correct):
     for i in range(20):
         if is_correct[sorted_args[i]]:
             return 1. / (i+1)
-    assert False # should never get here
 
-# score_matrix is a numpy array shape (NUM_DEV_SAMPLES, 20) matrix that contains the cosine similarity scores
+# score_matrix is a numpy array shape (num_dev_samples, 20) matrix that contains the cosine similarity scores
 # score_matrix[i][j] contains the similarity score between the i'th sample's main question and its j'th candidate question
-# is_correct of the numpy array shape (NUM_DEV_SAMPLES, 20), where is_correct[i][j] indicates whether the j'th candidate
+# is_correct of the numpy array shape (num_dev_samples, 20), where is_correct[i][j] indicates whether the j'th candidate
 # question for sample i is actually a similar question or not
 def evaluate_score_matrix_and_print(score_matrix, is_correct):
     map_total, mrr_total, p_at_1_total, p_at_5_total = 0, 0, 0, 0
-    NUM_DEV_SAMPLES = len(score_matrix)
+    num_samples = len(score_matrix)
     sorted_args = np.argsort(-score_matrix)
-    for i in range(NUM_DEV_SAMPLES):
+    # sorted_args = np.repeat(np.arange(0, 20)[np.newaxis, :], num_samples, axis=0) # uncomment this to find BM25 values
+    for i in range(num_samples):
         map_total += calculate_map(sorted_args[i], is_correct[i])
         mrr_total += calculate_mrr(sorted_args[i], is_correct[i])
         p_at_1_total += calculate_precision_at(sorted_args[i], is_correct[i], 1)
         p_at_5_total += calculate_precision_at(sorted_args[i], is_correct[i], 5)
-    print "MAP score is " + str(map_total / NUM_DEV_SAMPLES)
-    print "MRR score is " + str(mrr_total / NUM_DEV_SAMPLES)
-    print "P@1 score is " + str(p_at_1_total / NUM_DEV_SAMPLES)
-    print "P@5 score is " + str(p_at_5_total / NUM_DEV_SAMPLES)
+    print "MAP score is " + str(map_total / num_samples)
+    print "MRR score is " + str(mrr_total / num_samples)
+    print "P@1 score is " + str(p_at_1_total / num_samples)
+    print "P@5 score is " + str(p_at_5_total / num_samples)
 
 # -------------------------- LSTM ----------------------------------
 
@@ -225,16 +235,18 @@ def train_LSTM():
 
     orig_time = time()
 
-    num_batches = int(math.ceil(1. * NUM_TRAINING_SAMPLES / BATCH_SIZE))
     for epoch in range(NUM_EPOCHS):
         samples = get_training_data() # recalculate this every epoch to get new random selections
+        num_samples = len(samples)
+
+        num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
         total_loss = 0 # used for debugging only
         for i in range(num_batches):
             # Get the samples ready
             batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
             # If this is the last batch, then need to pad the batch to get the same shape as expected
-            if i == num_batches - 1 and NUM_TRAINING_SAMPLES % BATCH_SIZE != 0:
-                batch = np.concatenate((batch, np.zeros(((i+1) * BATCH_SIZE - NUM_TRAINING_SAMPLES, 22))), axis=0)
+            if i == num_batches - 1 and num_samples % BATCH_SIZE != 0:
+                batch = np.concatenate((batch, np.full(((i+1) * BATCH_SIZE - num_samples, 22), "0")), axis=0)
 
             # Convert from numpy arrays to tensors
             title_tensor, title_lengths = get_tensor_from_batch(batch, use_title=True)
@@ -258,26 +270,33 @@ def train_LSTM():
             loss.backward()
             optimizer.step()
 
-            # every 100 batches, take a break and check the dev accuracy
-            if i % 5 == 0:
-                print "For batch number " + str(i) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss / (i+1))
-            if i % 50 == 0:
-                evaluate_LSTM(model)
+            # every so while, check the dev accuracy
+            # if i % 10 == 0:
+            #     print "For batch number " + str(i) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss)
+            # if i % 100 == 0:
+            #     evaluate_LSTM(model)
+        print "For epoch number " + str(epoch) + " it has taken " + str(time() - orig_time) + "seconds and has loss " + str(total_loss)
+        evaluate_LSTM(model)
+        evaluate_LSTM(model, use_test_data=True)
     return model
 
 # Evaluates the model on the dev set data
-def evaluate_LSTM(model):
-    # samples has shape (num_dev_samples, 22), and is_correct has shape (num_dev_samples, 20)
-    samples, is_correct = get_dev_data()
+def evaluate_LSTM(model, use_test_data=False):
+    if use_test_data:
+        print "RUNNING EVALUATE ON THE TEST DATA:"
 
-    num_batches = int(math.ceil(1. * NUM_DEV_SAMPLES / BATCH_SIZE))
+    # samples has shape (num_dev_samples, 22), and is_correct has shape (num_dev_samples, 20)
+    samples, is_correct = get_dev_data(use_test_data=use_test_data)
+    num_samples = len(samples)
+
+    num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
     score_matrix = torch.Tensor().cuda() if USE_GPU else torch.Tensor()
     for i in range(num_batches):
         # Get the samples ready
         batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
         # If this is the last batch, then need to pad the batch to get the same shape as expected
-        if i == num_batches - 1 and NUM_DEV_SAMPLES % BATCH_SIZE != 0:
-            batch = np.concatenate((batch, np.full(((i+1) * BATCH_SIZE - NUM_DEV_SAMPLES, 22), "0")), axis=0)
+        if i == num_batches - 1 and num_samples % BATCH_SIZE != 0:
+            batch = np.concatenate((batch, np.full(((i+1) * BATCH_SIZE - num_samples, 22), "0")), axis=0)
 
         # Convert from numpy arrays to tensors
         title_tensor, title_lengths = get_tensor_from_batch(batch, use_title=True)
@@ -294,8 +313,8 @@ def evaluate_LSTM(model):
         # Compute evaluation
         X, _ = generate_score_matrix(title_encoding, body_encoding)
         X = torch.index_select(X.data, 1, torch.arange(0, 20).long().cuda() if USE_GPU else torch.arange(0,20).long()) # convert to tensor, throw out last bogus question
-        if i == num_batches - 1 and NUM_DEV_SAMPLES % BATCH_SIZE != 0:
-            score_matrix = torch.cat([score_matrix, X[:NUM_DEV_SAMPLES - i * BATCH_SIZE]])
+        if i == num_batches - 1 and num_samples % BATCH_SIZE != 0:
+            score_matrix = torch.cat([score_matrix, X[:num_samples - i * BATCH_SIZE]])
         else:
             score_matrix = torch.cat([score_matrix, X])
 
@@ -304,6 +323,5 @@ def evaluate_LSTM(model):
 
 if __name__ == '__main__':
     # Train LSTM
-    model = train_LSTM()
-    evaluate_LSTM(model)
+    train_LSTM()
 
