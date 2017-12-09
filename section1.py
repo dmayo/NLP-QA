@@ -14,18 +14,21 @@ torch.manual_seed(1)
 random.seed(1)
 
 USE_GPU = True
+SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
 
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
 TEST_FILEPATH = "askubuntu/test.txt"
+OUTPUT = "output.txt"
 
 BATCH_SIZE = 20
 EMBEDDING_DIM = 200
 LSTM_HIDDEN_DIM = 240
-# NUM_TRAINING_SAMPLES = 22853
-# NUM_DEV_SAMPLES = 189
+CNN_HIDDEN_DIM = 667
+CNN_KERNEL_SIZE = 3
+DROPOUT = 0.2
 
 LEARNING_RATE = 6e-4 # might change later
 WEIGHT_DECAY = 1e-5 # are we supposed to use this?
@@ -93,27 +96,49 @@ def get_tensor_from_batch(samples, use_title=True):
             tensor[word_index][q_index] = word_to_index[word]
     return Variable(tensor.long()), all_question_lengths
 
-# Given a set of hidden states in the LSTM, and given a list of the question lengths, calculates
+# Given a set of hidden states in the neural net, and given a list of the question lengths, calculates
 # the mean hidden state for every question.
-# lstm_out is of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
+# nn_out is of shape (max_question_length, BATCH_SIZE * 22, HIDDEN_DIM) for LSTMs
+# and is (BATCH_SIZE * 22, HIDDEN_DIM, max_question_length) for CNNs
 # question_lengths is a simple numpy array of length (BATCH_SIZE * 22)
-def get_encodings(lstm_out, question_lengths):
-    # changes the dimensions to shape (BATCH_SIZE * 22, max_question_length, LSTM_HIDDEN_DIM)
-    lstm_out = lstm_out.permute(1, 0, 2)
-    # Generate a mask of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
-    mask = torch.zeros(BATCH_SIZE * 22, len(lstm_out[0]), LSTM_HIDDEN_DIM).cuda() if USE_GPU else torch.zeros(BATCH_SIZE * 22, len(lstm_out[0]), LSTM_HIDDEN_DIM)
+def get_encodings(nn_out, question_lengths, use_lstm=True):
+    # changes the dimensions to shape (BATCH_SIZE * 22, max_question_length, HIDDEN_DIM)
+    nn_out = nn_out.permute(1, 0, 2) if use_lstm else nn_out.permute(0, 2, 1)
+    HIDDEN_DIM = len(nn_out[0][0])
+    # Generate a mask of shape (BATCH_SIZE * 22, max_question_length, HIDDEN_DIM)
+    mask = torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM).cuda() if USE_GPU else torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM)
     for q_index in range(len(question_lengths)):
         length = question_lengths[q_index]
         if length != 0:
-            mask[q_index][:length] = torch.ones(length, LSTM_HIDDEN_DIM)
-    lstm_out = lstm_out * Variable(mask)
+            mask[q_index][:length] = torch.ones(length, HIDDEN_DIM)
+    nn_out = nn_out * Variable(mask)
 
-    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, LSTM_HIDDEN_DIM))
+    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM))
     # mean_hidden_state.requires_grad = True
-    for q_index in range(len(lstm_out)):
+    for q_index in range(len(nn_out)):
         if question_lengths[q_index] != 0:
-            mean_hidden_state[q_index] = torch.sum(lstm_out[q_index], 0) / question_lengths[q_index]
+            mean_hidden_state[q_index] = torch.sum(nn_out[q_index], 0) / question_lengths[q_index]
     return mean_hidden_state
+
+# Saves the model in a file called lstm_models/epoch_0.txt
+def save_checkpoint(epoch, model, optimizer, use_lstm):
+    state = {
+        'state_dict': model.state_dict(),
+        'optimizer': optimizer.state_dict()
+    }
+    filename = ('lstm' if use_lstm else "cnn") + '_models/epoch_' + str(epoch) + ".txt"
+    torch.save(state, filename)
+
+def load_checkpoint(filename, model, optimizer):
+    checkpoint = torch.load(filename)
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+
+def print_and_write(text):
+    print text
+    with open(OUTPUT, "a") as f:
+        f.write(text)
+        f.write("\n")
 
 # -------------------------- EVALUATION RELATED CODE ----------------------------------
 
@@ -141,7 +166,7 @@ def get_dev_data(use_test_data=False):
 # Generates the matrix X of shape (BATCH_SIZE, 21), where X[i][j] gives the cosine similarity
 # between the main question i and the j-th question candidate, i.e. j=0 is the positive match and j=1~20 are the negative matches
 # Takes the average of the title encoding and the body encoding
-# The parameters are of shape (BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
+# The parameters are of shape (BATCH_SIZE * 22, HIDDEN_DIM)
 # y is just an all-zero vector of size (BATCH_SIZE)
 def generate_score_matrix(title_encoding, body_encoding):
     mean_hidden_state = (title_encoding + body_encoding) / 2.
@@ -188,46 +213,78 @@ def evaluate_score_matrix_and_print(score_matrix, is_correct):
         mrr_total += calculate_mrr(sorted_args[i], is_correct[i])
         p_at_1_total += calculate_precision_at(sorted_args[i], is_correct[i], 1)
         p_at_5_total += calculate_precision_at(sorted_args[i], is_correct[i], 5)
-    print "MAP score is " + str(map_total / num_samples)
-    print "MRR score is " + str(mrr_total / num_samples)
-    print "P@1 score is " + str(p_at_1_total / num_samples)
-    print "P@5 score is " + str(p_at_5_total / num_samples)
+    print_and_write("MAP score is " + str(map_total / num_samples))
+    print_and_write("MRR score is " + str(mrr_total / num_samples))
+    print_and_write("P@1 score is " + str(p_at_1_total / num_samples))
+    print_and_write("P@5 score is " + str(p_at_5_total / num_samples))
 
-# -------------------------- LSTM ----------------------------------
+# -------------------------- MODEL DEFINITIONS ----------------------------------
 
 class LSTMQA(nn.Module):
-    def __init__(self, hidden_dim, embedding_dim, pretrained_weight):
+    def __init__(self, pretrained_weight):
         super(LSTMQA, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.embedding_dim = embedding_dim
 
-        self.embed = nn.Embedding(len(pretrained_weight), self.embedding_dim, padding_idx=-1)
+        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
         pretrained_weight = torch.from_numpy(pretrained_weight).cuda() if USE_GPU else torch.from_numpy(pretrained_weight)
         self.embed.weight.data.copy_(pretrained_weight)
         self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
 
-        self.lstm = nn.LSTM(self.embedding_dim, hidden_dim)
+        # Use LSTM_HIDDEN_DIM/2 because this is bidirectional
+        self.lstm = nn.LSTM(EMBEDDING_DIM, LSTM_HIDDEN_DIM / 2, bidirectional=True)
+        self.dropout = nn.Dropout(p=DROPOUT) 
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
         # The axes semantics are (num_layers, minibatch_size, hidden_dim)
         if USE_GPU:
-            return (Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim).cuda()), Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim).cuda()))
+            return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda()), 
+                    Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda()))
         else:
-            return (Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim)), Variable(torch.zeros(1, BATCH_SIZE * 22, self.hidden_dim)))
+            return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2)), 
+                    Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2)))
 
     def forward(self, sentence):
-        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE)
-        # returns a list of all the hidden states
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
+        # returns a list of all the hidden states, is of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
         embeds = self.embed(sentence)
         lstm_out, self.hidden = self.lstm(embeds, self.hidden)
-        return lstm_out
+        return self.dropout(lstm_out)
+
+class CNNQA(nn.Module):
+    def __init__(self, pretrained_weight):
+        super(CNNQA, self).__init__()
+
+        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda() if USE_GPU else torch.from_numpy(pretrained_weight)
+        self.embed.weight.data.copy_(pretrained_weight)
+        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
+        
+        self.cnn = nn.Conv1d(EMBEDDING_DIM, CNN_HIDDEN_DIM, CNN_KERNEL_SIZE, padding=(CNN_KERNEL_SIZE - 1) / 2)
+        self.dropout = nn.Dropout(p=DROPOUT)
+        self.hidden = None # doesn't actually matter, used for consistentcy between the two models
+
+    def init_hidden(self):
+        pass
+
+    def forward(self, sentence):
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
+        # returns a list of all the hidden states, is of shape ()
+        embeds = self.embed(sentence) # currently shape (max_question_length, BATCH_SIZE * 22, EMBEDDING_DIM)
+        embeds = embeds.permute(1, 2, 0) # now (BATCH_SIZE * 22, EMBEDDING_DIM, max_question_length)
+
+        cnn_out = self.cnn(embeds) # shape (BATCH_SIZE * 22, CNN_HIDDEN_DIM, max_question_length)
+        return self.dropout(cnn_out)
 
 # Actually trains this thing
-def train_LSTM():
+def train_model(use_lstm=True):
+    if use_lstm:
+        print_and_write("Training the LSTM model with the GPU:" if USE_GPU else "Training the LSTM model:")
+    else:
+        print_and_write("Training the CNN model with the GPU:" if USE_GPU else "Training the CNN model")
+
     get_id_to_text()
     embeddings = get_word_embeddings()
-    model = LSTMQA(LSTM_HIDDEN_DIM, EMBEDDING_DIM, embeddings)
+    model = LSTMQA(embeddings) if use_lstm else CNNQA(embeddings)
     if USE_GPU:
         model.cuda()
     loss_function = nn.MultiMarginLoss(margin=0.2) # TODO: what about size_average?
@@ -240,7 +297,7 @@ def train_LSTM():
         num_samples = len(samples)
 
         num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
-        total_loss = 0 # used for debugging only
+        total_loss = 0 # used for debugging
         for i in range(num_batches):
             # Get the samples ready
             batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
@@ -257,11 +314,11 @@ def train_LSTM():
 
             # Run our forward pass and get the entire sequence of hidden states
             model.hidden = model.init_hidden()
-            title_lstm = model(title_tensor)
-            title_encoding = get_encodings(title_lstm, title_lengths)
+            title_hidden = model(title_tensor)
+            title_encoding = get_encodings(title_hidden, title_lengths, use_lstm=use_lstm)
             model.hidden = model.init_hidden()
-            body_lstm = model(body_tensor)
-            body_encoding = get_encodings(body_lstm, body_lengths)
+            body_hidden = model(body_tensor)
+            body_encoding = get_encodings(body_hidden, body_lengths, use_lstm=use_lstm)
             # Compute loss, gradients, update parameters
             # Could potentially do something about the last batch, but prolly won't affect training that much
             X, y = generate_score_matrix(title_encoding, body_encoding)
@@ -272,18 +329,24 @@ def train_LSTM():
 
             # every so while, check the dev accuracy
             # if i % 10 == 0:
-            #     print "For batch number " + str(i) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss)
-            # if i % 100 == 0:
-            #     evaluate_LSTM(model)
-        print "For epoch number " + str(epoch) + " it has taken " + str(time() - orig_time) + "seconds and has loss " + str(total_loss)
-        evaluate_LSTM(model)
-        evaluate_LSTM(model, use_test_data=True)
+            #     print_and_write("For batch number " + str(i) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss))
+            # if i > 0 and i % 100 == 0:
+            #     evaluate_model(model, use_lstm=use_lstm)
+        print_and_write("For epoch number " + str(epoch) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss))
+        evaluate_model(model, use_lstm=use_lstm)
+        evaluate_model(model, use_test_data=True, use_lstm=use_lstm)
+        if SAVE_MODELS:
+            save_checkpoint(epoch, model, optimizer, use_lstm)
     return model
 
 # Evaluates the model on the dev set data
-def evaluate_LSTM(model, use_test_data=False):
+def evaluate_model(model, use_test_data=False, use_lstm=True):
     if use_test_data:
-        print "RUNNING EVALUATE ON THE TEST DATA:"
+        print_and_write("Running evaluate on the TEST data:")
+    else:
+        print_and_write("Running evaluate on the DEV data:")
+    # Set the model to eval mode
+    model.eval()
 
     # samples has shape (num_dev_samples, 22), and is_correct has shape (num_dev_samples, 20)
     samples, is_correct = get_dev_data(use_test_data=use_test_data)
@@ -305,10 +368,10 @@ def evaluate_LSTM(model, use_test_data=False):
         # Run the model
         model.hidden = model.init_hidden()
         title_lstm = model(title_tensor)
-        title_encoding = get_encodings(title_lstm, title_lengths)
+        title_encoding = get_encodings(title_lstm, title_lengths, use_lstm=use_lstm)
         model.hidden = model.init_hidden()
         body_lstm = model(body_tensor)
-        body_encoding = get_encodings(body_lstm, body_lengths)
+        body_encoding = get_encodings(body_lstm, body_lengths, use_lstm=use_lstm)
 
         # Compute evaluation
         X, _ = generate_score_matrix(title_encoding, body_encoding)
@@ -321,7 +384,11 @@ def evaluate_LSTM(model, use_test_data=False):
     # score_matrix is a shape (num_dev_samples, 20) matrix that contains the cosine similarity scores
     evaluate_score_matrix_and_print(score_matrix.cpu().numpy(), is_correct)
 
-if __name__ == '__main__':
-    # Train LSTM
-    train_LSTM()
+    # Set the model back to train mode
+    model.train()
 
+if __name__ == '__main__':
+    # Train our two models
+    train_model(use_lstm=True)
+    print_and_write("\n\n\n\n\n\n")
+    train_model(use_lstm=False)
