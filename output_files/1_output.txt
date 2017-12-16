@@ -1,3 +1,0 @@
-Training the LSTM model with the GPU:
-For epoch number 0 it has taken 1488.06222582 seconds and has loss 29.5586673217
-Running evaluate on the DEV data:
