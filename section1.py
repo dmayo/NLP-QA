@@ -15,23 +15,24 @@ random.seed(1)
 
 USE_GPU = True
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
-GPU_NUM=0 # sets which gpu to use
+GPU_NUM=2 # sets which gpu to use
 
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
 TEST_FILEPATH = "askubuntu/test.txt"
-OUTPUT = "output.txt"
+OUTPUT = "6_output_dropout_03_lr_1e3_actually03_4was01.txt"
 
 BATCH_SIZE = 20
 EMBEDDING_DIM = 200
 LSTM_HIDDEN_DIM = 240
 CNN_HIDDEN_DIM = 667
 CNN_KERNEL_SIZE = 3
-DROPOUT = 0.2
+DROPOUT = 0.3
 
-LEARNING_RATE = 6e-4 # might change later
+#LEARNING_RATE = 6e-4 # might change later
+LEARNING_RATE = 1e-3
 WEIGHT_DECAY = 1e-5 # are we supposed to use this?
 NUM_EPOCHS = 15
 
@@ -127,7 +128,7 @@ def save_checkpoint(epoch, model, optimizer, use_lstm):
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict()
     }
-    filename = ('lstm' if use_lstm else "cnn") + '_models/epoch_' + str(epoch) + ".txt"
+    filename = ('lstm' if use_lstm else "cnn") + '_models_6/epoch_' + str(epoch) + ".txt"
     torch.save(state, filename)
 
 def load_checkpoint(filename, model, optimizer):
