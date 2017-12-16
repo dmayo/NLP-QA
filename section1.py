@@ -9,6 +9,7 @@ from collections import defaultdict
 import numpy as np
 import math
 from time import time
+import gc
 
 torch.manual_seed(1)
 random.seed(1)
@@ -339,6 +340,7 @@ def train_model(use_lstm=True):
         evaluate_model(model, use_test_data=True, use_lstm=use_lstm)
         if SAVE_MODELS:
             save_checkpoint(epoch, model, optimizer, use_lstm)
+        gc.collect()
     return model
 
 # Evaluates the model on the dev set data

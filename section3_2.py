@@ -9,23 +9,20 @@ from collections import defaultdict
 import numpy as np
 import math
 from time import time
+import gc
 
 torch.manual_seed(1)
 random.seed(1)
 
 USE_GPU = True
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
-GPU_NUM=3 # sets which gpu to use
+GPU_NUM=0 # sets which gpu to use
 
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
-DEV_FILEPATH = "Android/dev.txt"
-DEV_FILEPATH_POS = "Android/dev.pos.txt"
-DEV_FILEPATH_NEG = "Android/dev.neg.txt"
+DEV_FILEPATH = "askubuntu/dev.txt"
 TEST_FILEPATH = "askubuntu/test.txt"
-TEST_FILEPATH_POS = "Android/test.pos.txt"
-TEST_FILEPATH_NEG = "Android/test.neg.txt"
 OUTPUT = "output.txt"
 
 BATCH_SIZE = 20
@@ -61,19 +58,11 @@ def get_word_embeddings():
     index = 1
     with open(EMBEDDINGS, 'r') as f:
         for line in f.readlines():
-            splits = line.split(" ")
+            splits = line.split()
             word_to_index[splits[0]] = index
             embedding_list.append(map(float, splits[1:]))
             index += 1
-    #print embedding_list
     return np.array(embedding_list)
-
-def readVectors(filename):
-    vectsEmbed={}
-    for line in file(filename):
-        splits=line.split(" ")
-        vectsEmbed[splits[0]]=np.array(map(float, splits[1:]))
-    return vectsEmbed
 
 # Returns all samples of training data
 # The data is provided in the format (original_question), (LIST of positive_matches), (100 RANDOM negative_matches)
@@ -176,37 +165,6 @@ def get_dev_data(use_test_data=False):
                 is_correct.append([True if cand_qid in similar_ids else False for cand_qid in candidate_qids])
     return np.array(dev_data), np.array(is_correct)
 
-
-# Returns the dev data in a numpy array, where each dev sample is of the format (q_id, candidate_1, candidate_2, ..., candidate_20, 0)
-# Add an extra bogus question to keep this shape similar to the training data shape
-# This numpy array has shape (num_dev_samples, 22)
-# Look at https://github.com/taolei87/askubuntu for some more info
-# Also returns a numpy array is_correct of the shape (num_dev_samples, 20), where is_correct[i][j] indicates whether the j'th candidate
-# question for sample i is actually a similar question or not
-# Can use the flag use_test_data to get data from the test filepath instead
-def get_dev_data_android(use_test_data=False):
-    dev_data = []
-    is_correct = []
-    filepath_pos = TEST_FILEPATH_POS if use_test_data else DEV_FILEPATH_POS
-    filepath_neg = TEST_FILEPATH_NEG if use_test_data else DEV_FILEPATH_NEG
-    pos={}
-    #neg={}
-    total={}
-    with open(filepath_pos, 'r') as f:
-        for line in f.readlines():
-            similar_ids, candidate_qids, _ = line.split('\t')
-            pos.setdefault(similar_ids, [candidate_qids]).append(candidate_qids)
-            total.setdefault(similar_ids, [candidate_qids]).append(candidate_qids)
-    with open(filepath_neg, 'r') as f:
-        for line in f.readlines():
-            similar_ids, candidate_qids, _ = line.split('\t')
-            #neg.setdefault(similar_ids, [candidate_qids]).append(candidate_qids)
-            total.setdefault(similar_ids, [candidate_qids]).append(candidate_qids)
-    for key in total:
-        dev_data.append([key] + total[key] + ['0'])
-        is_correct.append([True if cand_qid in pos else False for cand_qid in total[key]])
-    return np.array(dev_data), np.array(is_correct)
-
 # Generates the matrix X of shape (BATCH_SIZE, 21), where X[i][j] gives the cosine similarity
 # between the main question i and the j-th question candidate, i.e. j=0 is the positive match and j=1~20 are the negative matches
 # Takes the average of the title encoding and the body encoding
@@ -294,7 +252,59 @@ class LSTMQA(nn.Module):
         lstm_out, self.hidden = self.lstm(embeds, self.hidden)
         return self.dropout(lstm_out)
 
-class CNNQA(nn.Module):
+class CNN_Feature_Extractor(nn.Module):
+    def __init__(self, pretrained_weight):
+        super(CNNQA, self).__init__()
+
+        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
+        self.embed.weight.data.copy_(pretrained_weight)
+        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
+        
+        self.cnn = nn.Conv1d(EMBEDDING_DIM, CNN_HIDDEN_DIM, CNN_KERNEL_SIZE, padding=(CNN_KERNEL_SIZE - 1) / 2)
+        self.dropout = nn.Dropout(p=DROPOUT)
+        self.hidden = None # doesn't actually matter, used for consistentcy between the two models
+
+    def init_hidden(self):
+        pass
+
+    def forward(self, sentence):
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
+        # returns a list of all the hidden states, is of shape ()
+        embeds = self.embed(sentence) # currently shape (max_question_length, BATCH_SIZE * 22, EMBEDDING_DIM)
+        embeds = embeds.permute(1, 2, 0) # now (BATCH_SIZE * 22, EMBEDDING_DIM, max_question_length)
+
+        cnn_out = self.cnn(embeds) # shape (BATCH_SIZE * 22, CNN_HIDDEN_DIM, max_question_length)
+        return self.dropout(cnn_out)
+
+class CNN_Label_Predictor(nn.Module):
+    def __init__(self, pretrained_weight):
+        super(CNNQA, self).__init__()
+
+        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
+        self.embed.weight.data.copy_(pretrained_weight)
+        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
+        
+        self.cnn = nn.Conv1d(EMBEDDING_DIM, CNN_HIDDEN_DIM, CNN_KERNEL_SIZE, padding=(CNN_KERNEL_SIZE - 1) / 2)
+        self.dropout = nn.Dropout(p=DROPOUT)
+        self.hidden = None # doesn't actually matter, used for consistentcy between the two models
+
+    def init_hidden(self):
+        pass
+
+    def forward(self, sentence):
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
+        # returns a list of all the hidden states, is of shape ()
+        embeds = self.embed(sentence) # currently shape (max_question_length, BATCH_SIZE * 22, EMBEDDING_DIM)
+        embeds = embeds.permute(1, 2, 0) # now (BATCH_SIZE * 22, EMBEDDING_DIM, max_question_length)
+
+        cnn_out = self.cnn(embeds) # shape (BATCH_SIZE * 22, CNN_HIDDEN_DIM, max_question_length)
+        return self.dropout(cnn_out)
+
+# three fully connected layers
+# x->1024->1024->2
+class NN_Domain_Classifier(nn.Module):
     def __init__(self, pretrained_weight):
         super(CNNQA, self).__init__()
 
@@ -381,6 +391,7 @@ def train_model(use_lstm=True):
         evaluate_model(model, use_test_data=True, use_lstm=use_lstm)
         if SAVE_MODELS:
             save_checkpoint(epoch, model, optimizer, use_lstm)
+        gc.collect()
     return model
 
 # Evaluates the model on the dev set data
@@ -393,7 +404,7 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
     model.eval()
 
     # samples has shape (num_dev_samples, 22), and is_correct has shape (num_dev_samples, 20)
-    samples, is_correct = get_dev_data_android(use_test_data=use_test_data)
+    samples, is_correct = get_dev_data(use_test_data=use_test_data)
     num_samples = len(samples)
 
     num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
@@ -433,6 +444,6 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
 
 if __name__ == '__main__':
     # Train our two models
-    train_model(use_lstm=True)
-    print_and_write("\n\n\n\n\n\n")
+    #train_model(use_lstm=True)
+    #print_and_write("\n\n\n\n\n\n")
     train_model(use_lstm=False)
