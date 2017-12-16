@@ -15,17 +15,17 @@ random.seed(1)
 
 USE_GPU = True
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
-GPU_NUM=0 # sets which gpu to use
+GPU_NUM=3 # sets which gpu to use
 
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
-EMBEDDINGS = "word_vectors.txt"
-DEV_FILEPATH = "android/dev.txt"
-DEV_FILEPATH_POS = "android/dev.pos.txt"
-DEV_FILEPATH_NEG = "android/dev.neg.txt"
+EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
+DEV_FILEPATH = "Android/dev.txt"
+DEV_FILEPATH_POS = "Android/dev.pos.txt"
+DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH = "askubuntu/test.txt"
-TEST_FILEPATH_POS = "android/test.pos.txt"
-TEST_FILEPATH_NEG = "android/test.neg.txt"
+TEST_FILEPATH_POS = "Android/test.pos.txt"
+TEST_FILEPATH_NEG = "Android/test.neg.txt"
 OUTPUT = "output.txt"
 
 BATCH_SIZE = 20
@@ -65,6 +65,7 @@ def get_word_embeddings():
             word_to_index[splits[0]] = index
             embedding_list.append(map(float, splits[1:]))
             index += 1
+    #print embedding_list
     return np.array(embedding_list)
 
 def readVectors(filename):

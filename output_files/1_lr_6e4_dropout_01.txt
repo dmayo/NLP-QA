@@ -1,0 +1,339 @@
+Training the LSTM model with the GPU:
+For epoch number 0 it has taken 1443.71613312 seconds and has loss 28.8547000876
+Running evaluate on the DEV data:
+MAP score is 0.555143175354
+MRR score is 0.662904504373
+P@1 score is 0.52380952381
+P@5 score is 0.42962962963
+Running evaluate on the TEST data:
+MAP score is 0.556250768647
+MRR score is 0.685494266466
+P@1 score is 0.543010752688
+P@5 score is 0.412903225806
+For epoch number 1 it has taken 2868.24525619 seconds and has loss 15.1549217326
+Running evaluate on the DEV data:
+MAP score is 0.559440232438
+MRR score is 0.68227274636
+P@1 score is 0.560846560847
+P@5 score is 0.438095238095
+Running evaluate on the TEST data:
+MAP score is 0.562675804406
+MRR score is 0.712870390237
+P@1 score is 0.58064516129
+P@5 score is 0.429032258065
+For epoch number 2 it has taken 4265.87940216 seconds and has loss 12.7804865564
+Running evaluate on the DEV data:
+MAP score is 0.559446103603
+MRR score is 0.670310267334
+P@1 score is 0.534391534392
+P@5 score is 0.446560846561
+Running evaluate on the TEST data:
+MAP score is 0.565822907814
+MRR score is 0.705220510715
+P@1 score is 0.569892473118
+P@5 score is 0.42688172043
+For epoch number 3 it has taken 5640.91017818 seconds and has loss 11.3645017501
+Running evaluate on the DEV data:
+MAP score is 0.549138085433
+MRR score is 0.656330177759
+P@1 score is 0.518518518519
+P@5 score is 0.440211640212
+Running evaluate on the TEST data:
+MAP score is 0.583124666249
+MRR score is 0.730106089357
+P@1 score is 0.612903225806
+P@5 score is 0.42688172043
+For epoch number 4 it has taken 7023.06048608 seconds and has loss 10.4876574375
+Running evaluate on the DEV data:
+MAP score is 0.545889426308
+MRR score is 0.654493766772
+P@1 score is 0.507936507937
+P@5 score is 0.44126984127
+Running evaluate on the TEST data:
+MAP score is 0.583669073803
+MRR score is 0.739018284029
+P@1 score is 0.629032258065
+P@5 score is 0.429032258065
+For epoch number 5 it has taken 8410.61586308 seconds and has loss 9.75297287996
+Running evaluate on the DEV data:
+MAP score is 0.555250935209
+MRR score is 0.673091708409
+P@1 score is 0.534391534392
+P@5 score is 0.446560846561
+Running evaluate on the TEST data:
+MAP score is 0.576645310256
+MRR score is 0.732103514211
+P@1 score is 0.612903225806
+P@5 score is 0.430107526882
+For epoch number 6 it has taken 9808.67313409 seconds and has loss 9.30296390206
+Running evaluate on the DEV data:
+MAP score is 0.550339889007
+MRR score is 0.67112577311
+P@1 score is 0.529100529101
+P@5 score is 0.44126984127
+Running evaluate on the TEST data:
+MAP score is 0.57671988556
+MRR score is 0.72590943672
+P@1 score is 0.60752688172
+P@5 score is 0.422580645161
+For epoch number 7 it has taken 11204.7667792 seconds and has loss 8.94172375732
+Running evaluate on the DEV data:
+MAP score is 0.555265826427
+MRR score is 0.67407066038
+P@1 score is 0.534391534392
+P@5 score is 0.444444444444
+Running evaluate on the TEST data:
+MAP score is 0.589061521328
+MRR score is 0.745327282676
+P@1 score is 0.629032258065
+P@5 score is 0.436559139785
+For epoch number 8 it has taken 12602.3082302 seconds and has loss 8.47938638267
+Running evaluate on the DEV data:
+MAP score is 0.553418667989
+MRR score is 0.668551657044
+P@1 score is 0.52380952381
+P@5 score is 0.447619047619
+Running evaluate on the TEST data:
+MAP score is 0.581740707305
+MRR score is 0.716220179399
+P@1 score is 0.586021505376
+P@5 score is 0.431182795699
+For epoch number 9 it has taken 13996.1244612 seconds and has loss 8.2377766504
+Running evaluate on the DEV data:
+MAP score is 0.552528924037
+MRR score is 0.665770193945
+P@1 score is 0.529100529101
+P@5 score is 0.45291005291
+Running evaluate on the TEST data:
+MAP score is 0.580921291843
+MRR score is 0.727481916467
+P@1 score is 0.596774193548
+P@5 score is 0.431182795699
+For epoch number 10 it has taken 15355.0315082 seconds and has loss 7.95146812016
+Running evaluate on the DEV data:
+MAP score is 0.552096121435
+MRR score is 0.673350586026
+P@1 score is 0.534391534392
+P@5 score is 0.442328042328
+Running evaluate on the TEST data:
+MAP score is 0.58557749075
+MRR score is 0.735697515788
+P@1 score is 0.60752688172
+P@5 score is 0.431182795699
+For epoch number 11 it has taken 16719.2716901 seconds and has loss 7.67331633474
+Running evaluate on the DEV data:
+MAP score is 0.557660233109
+MRR score is 0.668419939303
+P@1 score is 0.52380952381
+P@5 score is 0.447619047619
+Running evaluate on the TEST data:
+MAP score is 0.578381541468
+MRR score is 0.724597793422
+P@1 score is 0.591397849462
+P@5 score is 0.433333333333
+For epoch number 12 it has taken 18081.9419222 seconds and has loss 7.44093861984
+Running evaluate on the DEV data:
+MAP score is 0.564213274937
+MRR score is 0.682208629804
+P@1 score is 0.550264550265
+P@5 score is 0.457142857143
+Running evaluate on the TEST data:
+MAP score is 0.583096970338
+MRR score is 0.726575930279
+P@1 score is 0.586021505376
+P@5 score is 0.436559139785
+For epoch number 13 it has taken 19440.2090211 seconds and has loss 7.26499459612
+Running evaluate on the DEV data:
+MAP score is 0.558933123104
+MRR score is 0.672077875326
+P@1 score is 0.534391534392
+P@5 score is 0.458201058201
+Running evaluate on the TEST data:
+MAP score is 0.584709927374
+MRR score is 0.731169576583
+P@1 score is 0.596774193548
+P@5 score is 0.444086021505
+For epoch number 14 it has taken 20805.8923831 seconds and has loss 7.04061990976
+Running evaluate on the DEV data:
+MAP score is 0.563895407983
+MRR score is 0.684107610496
+P@1 score is 0.550264550265
+P@5 score is 0.45291005291
+Running evaluate on the TEST data:
+MAP score is 0.582052334745
+MRR score is 0.7316531783
+P@1 score is 0.596774193548
+P@5 score is 0.444086021505
+
+
+
+
+
+
+
+Training the CNN model with the GPU:
+For epoch number 0 it has taken 2204.19773006 seconds and has loss 24.8716380917
+Running evaluate on the DEV data:
+MAP score is 0.538918353837
+MRR score is 0.653810881168
+P@1 score is 0.507936507937
+P@5 score is 0.422222222222
+Running evaluate on the TEST data:
+MAP score is 0.553818710588
+MRR score is 0.68281672228
+P@1 score is 0.548387096774
+P@5 score is 0.410752688172
+For epoch number 1 it has taken 4421.10075021 seconds and has loss 15.8937791538
+Running evaluate on the DEV data:
+MAP score is 0.549988495666
+MRR score is 0.657950617871
+P@1 score is 0.518518518519
+P@5 score is 0.428571428571
+Running evaluate on the TEST data:
+MAP score is 0.560007745548
+MRR score is 0.696388181946
+P@1 score is 0.569892473118
+P@5 score is 0.420430107527
+For epoch number 2 it has taken 6635.55464411 seconds and has loss 13.7371860501
+Running evaluate on the DEV data:
+MAP score is 0.545213117967
+MRR score is 0.6593951463
+P@1 score is 0.513227513228
+P@5 score is 0.427513227513
+Running evaluate on the TEST data:
+MAP score is 0.55806429426
+MRR score is 0.691221198628
+P@1 score is 0.55376344086
+P@5 score is 0.41935483871
+For epoch number 3 it has taken 8857.2311821 seconds and has loss 12.5232227548
+Running evaluate on the DEV data:
+MAP score is 0.544564594571
+MRR score is 0.654424871363
+P@1 score is 0.507936507937
+P@5 score is 0.42962962963
+Running evaluate on the TEST data:
+MAP score is 0.552786763229
+MRR score is 0.695250802684
+P@1 score is 0.559139784946
+P@5 score is 0.41935483871
+For epoch number 4 it has taken 11082.6939101 seconds and has loss 11.9781683601
+Running evaluate on the DEV data:
+MAP score is 0.550596403675
+MRR score is 0.674710080441
+P@1 score is 0.529100529101
+P@5 score is 0.427513227513
+Running evaluate on the TEST data:
+MAP score is 0.56250851171
+MRR score is 0.706842793282
+P@1 score is 0.575268817204
+P@5 score is 0.424731182796
+For epoch number 5 it has taken 13296.8436921 seconds and has loss 11.3582171795
+Running evaluate on the DEV data:
+MAP score is 0.555404116702
+MRR score is 0.671098580474
+P@1 score is 0.534391534392
+P@5 score is 0.424338624339
+Running evaluate on the TEST data:
+MAP score is 0.556934986825
+MRR score is 0.687353739922
+P@1 score is 0.537634408602
+P@5 score is 0.420430107527
+For epoch number 6 it has taken 15512.3885312 seconds and has loss 11.1976508991
+Running evaluate on the DEV data:
+MAP score is 0.55217954009
+MRR score is 0.673431268821
+P@1 score is 0.534391534392
+P@5 score is 0.42962962963
+Running evaluate on the TEST data:
+MAP score is 0.552827518446
+MRR score is 0.682680966223
+P@1 score is 0.52688172043
+P@5 score is 0.425806451613
+For epoch number 7 it has taken 17730.1543331 seconds and has loss 10.7002732663
+Running evaluate on the DEV data:
+MAP score is 0.542439069546
+MRR score is 0.662925446332
+P@1 score is 0.52380952381
+P@5 score is 0.42328042328
+Running evaluate on the TEST data:
+MAP score is 0.563383821697
+MRR score is 0.696969877411
+P@1 score is 0.55376344086
+P@5 score is 0.422580645161
+For epoch number 8 it has taken 19911.862849 seconds and has loss 10.4579660192
+Running evaluate on the DEV data:
+MAP score is 0.545980986452
+MRR score is 0.657431633622
+P@1 score is 0.507936507937
+P@5 score is 0.42962962963
+Running evaluate on the TEST data:
+MAP score is 0.556032012706
+MRR score is 0.692721837984
+P@1 score is 0.548387096774
+P@5 score is 0.423655913978
+For epoch number 9 it has taken 22096.645895 seconds and has loss 10.2596317092
+Running evaluate on the DEV data:
+MAP score is 0.545633973832
+MRR score is 0.662628839415
+P@1 score is 0.518518518519
+P@5 score is 0.425396825397
+Running evaluate on the TEST data:
+MAP score is 0.55859205005
+MRR score is 0.698881881644
+P@1 score is 0.55376344086
+P@5 score is 0.421505376344
+For epoch number 10 it has taken 24280.9479401 seconds and has loss 10.258509477
+Running evaluate on the DEV data:
+MAP score is 0.548396451749
+MRR score is 0.663672428626
+P@1 score is 0.52380952381
+P@5 score is 0.427513227513
+Running evaluate on the TEST data:
+MAP score is 0.555740730438
+MRR score is 0.686690447121
+P@1 score is 0.52688172043
+P@5 score is 0.423655913978
+For epoch number 11 it has taken 26498.7938142 seconds and has loss 10.1870388511
+Running evaluate on the DEV data:
+MAP score is 0.543259513973
+MRR score is 0.656481875206
+P@1 score is 0.513227513228
+P@5 score is 0.424338624339
+Running evaluate on the TEST data:
+MAP score is 0.560725685095
+MRR score is 0.705162772523
+P@1 score is 0.559139784946
+P@5 score is 0.427956989247
+For epoch number 12 it has taken 28716.2869842 seconds and has loss 9.97474430958
+Running evaluate on the DEV data:
+MAP score is 0.542844286367
+MRR score is 0.661235481847
+P@1 score is 0.52380952381
+P@5 score is 0.424338624339
+Running evaluate on the TEST data:
+MAP score is 0.558192989415
+MRR score is 0.696793612748
+P@1 score is 0.55376344086
+P@5 score is 0.424731182796
+For epoch number 13 it has taken 30926.2250421 seconds and has loss 9.92899833841
+Running evaluate on the DEV data:
+MAP score is 0.545309845043
+MRR score is 0.662419891983
+P@1 score is 0.529100529101
+P@5 score is 0.434920634921
+Running evaluate on the TEST data:
+MAP score is 0.563560653735
+MRR score is 0.707761844126
+P@1 score is 0.58064516129
+P@5 score is 0.42688172043
+For epoch number 14 it has taken 33133.169769 seconds and has loss 9.9015180585
+Running evaluate on the DEV data:
+MAP score is 0.544212523613
+MRR score is 0.665784891182
+P@1 score is 0.529100529101
+P@5 score is 0.422222222222
+Running evaluate on the TEST data:
+MAP score is 0.561139270304
+MRR score is 0.706455031079
+P@1 score is 0.569892473118
+P@5 score is 0.432258064516
