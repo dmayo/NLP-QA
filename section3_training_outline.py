@@ -14,16 +14,14 @@ def train_model(use_lstm=True):
         model.cuda(GPU_NUM)
     '''
     model_Feature_Extractor = CNN_Feature_Extractor(embeddings)
-    model_Label_Predictor = CNN_Label_Predictor()
     model_Domain_Classifier = NN_Domain_Classifier()
 
     #domain classifier loss
     L_d_function = nn.MultiMarginLoss(margin=0.2) #binomial cross entropy loss
     L_y_function = nn.MultiMarginLoss(margin=0.2) #logistic regression loss
-    total_loss = L_y-lambda1*L_d
     
-    optimizer_L_d = optim.Adam(filter(lambda x: x.requires_grad, model_Feature_Extractor.parameters() + model_Domain_Classifier.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    optimizer_L_y = optim.Adam(filter(lambda x: x.requires_grad, model_Feature_Extractor.parameters() + model_Label_Predictor.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer_L_d = optim.Adam(filter(lambda x: x.requires_grad, model_Domain_Classifier.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer_L_f = optim.Adam(filter(lambda x: x.requires_grad, model_Feature_Extractor.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
     orig_time = time()
 
@@ -65,23 +63,23 @@ def train_model(use_lstm=True):
   
             L_d_loss = L_d_function(Domain_Classifier_hidden,y_d) # get y_d from somewhere?
             total_L_d_loss += L_y_loss.data[0]
-            L_d_loss.backward()
-            optimizer_L_d.step()
 
 
 
             ########### Set up the label predictor network ###########
 
             # Compute loss, gradients, update parameters
-            model_Label_Predictor.hidden = model_Label_Predictor.init_hidden()
-            Label_Predictor_hidden=model_Label_Predictor(mean_hidden_state) # this should only be from the ubuntu dataset?
             X_y, y_y = generate_score_matrix(mean_hidden_state)
 
-            total_L_y_loss += L_y_loss.data[0]
             L_y_loss = L_y_function(X_y,y_y)
-            L_y_loss.backward()
-            optimizer_L_y.step()
+            total_L_y_loss += L_y_loss.data[0]
 
+
+            #L_d_loss.backward()
+            #L_y_loss.backward()
+            (L_y-lambda1*L_d).backward()
+            optimizer_L_d.step()
+            optimizer_L_f.step()
 
             total_loss += loss.data[0]
 

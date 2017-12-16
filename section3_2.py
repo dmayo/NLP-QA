@@ -252,32 +252,13 @@ class LSTMQA(nn.Module):
         lstm_out, self.hidden = self.lstm(embeds, self.hidden)
         return self.dropout(lstm_out)
 
+class GRL(torch.autograd.Function):
+    def forward(self, x):
+        return x.view_as(x)
+    def backward(self, grad_output):
+        return (grad_output * -LAMDA) # need tune
+
 class CNN_Feature_Extractor(nn.Module):
-    def __init__(self, pretrained_weight):
-        super(CNNQA, self).__init__()
-
-        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
-        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
-        self.embed.weight.data.copy_(pretrained_weight)
-        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
-        
-        self.cnn = nn.Conv1d(EMBEDDING_DIM, CNN_HIDDEN_DIM, CNN_KERNEL_SIZE, padding=(CNN_KERNEL_SIZE - 1) / 2)
-        self.dropout = nn.Dropout(p=DROPOUT)
-        self.hidden = None # doesn't actually matter, used for consistentcy between the two models
-
-    def init_hidden(self):
-        pass
-
-    def forward(self, sentence):
-        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
-        # returns a list of all the hidden states, is of shape ()
-        embeds = self.embed(sentence) # currently shape (max_question_length, BATCH_SIZE * 22, EMBEDDING_DIM)
-        embeds = embeds.permute(1, 2, 0) # now (BATCH_SIZE * 22, EMBEDDING_DIM, max_question_length)
-
-        cnn_out = self.cnn(embeds) # shape (BATCH_SIZE * 22, CNN_HIDDEN_DIM, max_question_length)
-        return self.dropout(cnn_out)
-
-class CNN_Label_Predictor(nn.Module):
     def __init__(self, pretrained_weight):
         super(CNNQA, self).__init__()
 
@@ -305,29 +286,20 @@ class CNN_Label_Predictor(nn.Module):
 # three fully connected layers
 # x->1024->1024->2
 class NN_Domain_Classifier(nn.Module):
-    def __init__(self, pretrained_weight):
+    def __init__(self,):
         super(CNNQA, self).__init__()
-
-        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
-        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
-        self.embed.weight.data.copy_(pretrained_weight)
-        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
-        
-        self.cnn = nn.Conv1d(EMBEDDING_DIM, CNN_HIDDEN_DIM, CNN_KERNEL_SIZE, padding=(CNN_KERNEL_SIZE - 1) / 2)
-        self.dropout = nn.Dropout(p=DROPOUT)
-        self.hidden = None # doesn't actually matter, used for consistentcy between the two models
+        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 10)
 
     def init_hidden(self):
         pass
 
-    def forward(self, sentence):
-        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
-        # returns a list of all the hidden states, is of shape ()
-        embeds = self.embed(sentence) # currently shape (max_question_length, BATCH_SIZE * 22, EMBEDDING_DIM)
-        embeds = embeds.permute(1, 2, 0) # now (BATCH_SIZE * 22, EMBEDDING_DIM, max_question_length)
-
-        cnn_out = self.cnn(embeds) # shape (BATCH_SIZE * 22, CNN_HIDDEN_DIM, max_question_length)
-        return self.dropout(cnn_out)
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
 
 # Actually trains this thing
 def train_model(use_lstm=True):
@@ -338,11 +310,20 @@ def train_model(use_lstm=True):
 
     get_id_to_text()
     embeddings = get_word_embeddings()
-    model = LSTMQA(embeddings) if use_lstm else CNNQA(embeddings)
+    '''
+    model_Feature_Extractor = LSTMQA(embeddings) if use_lstm else CNN_Feature_Extractor(embeddings)
     if USE_GPU:
         model.cuda(GPU_NUM)
-    loss_function = nn.MultiMarginLoss(margin=0.2) # TODO: what about size_average?
-    optimizer = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    '''
+    model_Feature_Extractor = CNN_Feature_Extractor(embeddings)
+    model_Domain_Classifier = NN_Domain_Classifier()
+
+    #domain classifier loss
+    L_d_function = nn.MultiMarginLoss(margin=0.2) #binomial cross entropy loss
+    L_y_function = nn.MultiMarginLoss(margin=0.2) #logistic regression loss
+    
+    optimizer_L_d = optim.Adam(filter(lambda x: x.requires_grad, model_Domain_Classifier.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer_L_f = optim.Adam(filter(lambda x: x.requires_grad, model_Feature_Extractor.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
     orig_time = time()
 
@@ -359,27 +340,51 @@ def train_model(use_lstm=True):
             if i == num_batches - 1 and num_samples % BATCH_SIZE != 0:
                 batch = np.concatenate((batch, np.full(((i+1) * BATCH_SIZE - num_samples, 22), "0")), axis=0)
 
+            ########### Set up the feature extractor network ###########
             # Convert from numpy arrays to tensors
             title_tensor, title_lengths = get_tensor_from_batch(batch, use_title=True)
             body_tensor, body_lengths = get_tensor_from_batch(batch, use_title=False)
 
             # Reset the model
-            optimizer.zero_grad()
+            optimizer_L_d.zero_grad() # where should these be reset?
+            optimizer_L_f.zero_grad()
 
+            model_Feature_Extractor.hidden = model_Feature_Extractor.init_hidden()
             # Run our forward pass and get the entire sequence of hidden states
-            model.hidden = model.init_hidden()
-            title_hidden = model(title_tensor)
+            title_hidden = model_Feature_Extractor(title_tensor)
             title_encoding = get_encodings(title_hidden, title_lengths, use_lstm=use_lstm)
-            model.hidden = model.init_hidden()
-            body_hidden = model(body_tensor)
+            model_Feature_Extractor.hidden = model_Feature_Extractor.init_hidden()
+            body_hidden = model_Feature_Extractor(body_tensor)
             body_encoding = get_encodings(body_hidden, body_lengths, use_lstm=use_lstm)
+            mean_hidden_state = (title_encoding + body_encoding) / 2.
+
+            ########### Set up the domain classifier network ###########
+
+            model_Domain_Classifier.hidden = model_Domain_classifier.init_hidden()
+            Domain_Classifier_hidden=model_Domain_Classifier(mean_hidden_state)
+  
+            L_d_loss = L_d_function(Domain_Classifier_hidden,y_d) # get y_d from somewhere?
+            total_L_d_loss += L_d_loss.data[0]
+
+
+
+            ########### Set up the label predictor network ###########
+
             # Compute loss, gradients, update parameters
-            # Could potentially do something about the last batch, but prolly won't affect training that much
-            X, y = generate_score_matrix(title_encoding, body_encoding)
-            loss = loss_function(X, y)
+            X_y, y_y = generate_score_matrix(mean_hidden_state)
+
+            L_y_loss = L_y_function(X_y,y_y)
+            total_L_y_loss += L_y_loss.data[0]
+
+
+            #L_d_loss.backward()
+            #L_y_loss.backward()
+            (L_y-lambda1*L_d).backward()
+            optimizer_L_d.step()
+            optimizer_L_f.step()
+
             total_loss += loss.data[0]
-            loss.backward()
-            optimizer.step()
+
 
             # every so while, check the dev accuracy
             # if i % 10 == 0:
@@ -391,7 +396,6 @@ def train_model(use_lstm=True):
         evaluate_model(model, use_test_data=True, use_lstm=use_lstm)
         if SAVE_MODELS:
             save_checkpoint(epoch, model, optimizer, use_lstm)
-        gc.collect()
     return model
 
 # Evaluates the model on the dev set data
