@@ -2,3 +2,5 @@ Android/
 askubuntu/
 cnn_models/
 lstm_models/
+pruning/
+pruned_glove.txt
