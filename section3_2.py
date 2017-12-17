@@ -62,8 +62,8 @@ def get_id_to_text_android():
     with open(TEXT_FILEPATH_ANDROID, 'r') as f:
         for line in f.readlines():
             id, title, body = line.split("\t")
-            id_to_title_android[id] = title
-            id_to_body_android[id] = " ".join(body.split()[:100])
+            id_to_title_android[id] = title.lower()
+            id_to_body_android[id] = (" ".join(body.split()[:100])).lower()
 
 
 # Returns the numpy array embeddings, which is of shape (num_embeddings, EMBEDDING_DIM)
