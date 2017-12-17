@@ -15,9 +15,9 @@ from meter import AUCMeter
 torch.manual_seed(1)
 random.seed(1)
 
-USE_GPU = False
+USE_GPU = True
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
-GPU_NUM=0 # sets which gpu to use
+GPU_NUM=3 # sets which gpu to use
 
 TEXT_FILEPATH_UBUNTU = "askubuntu/text_tokenized.txt"
 TEXT_FILEPATH_ANDROID = "Android/corpus.tsv"
@@ -27,7 +27,7 @@ DEV_FILEPATH_POS = "Android/dev.pos.txt"
 DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH_POS = "Android/test.pos.txt"
 TEST_FILEPATH_NEG = "Android/test.neg.txt"
-OUTPUT = "output.txt"
+OUTPUT = "output_domain_adaptation_1.txt"
 
 BATCH_SIZE = 20
 EMBEDDING_DIM = 300
@@ -169,7 +169,7 @@ def save_checkpoint(epoch, model, optimizer, use_lstm):
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict()
     }
-    filename = ('lstm' if use_lstm else "cnn") + '_models/epoch_' + str(epoch) + ".txt"
+    filename = ('lstm' if use_lstm else "cnn") + '_models_DA1/epoch_' + str(epoch) + ".txt"
     torch.save(state, filename)
 
 def load_checkpoint(filename, model, optimizer):
