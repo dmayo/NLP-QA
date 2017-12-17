@@ -157,7 +157,7 @@ def get_tensor_from_batch(samples_ubuntu, samples_android, use_title=True):
     for q_index, q_id in enumerate(samples_android.flatten()):
         for word_index, word in enumerate(d_android[q_id].split()):
             tensor[word_index][BATCH_SIZE * len(samples_ubuntu[0])+q_index] = word_to_index[word]
-    return Variable(tensor.long()), all_question_lengths_ubuntu.append(all_question_lengths_android)
+    return Variable(tensor.long()), np.concatenate(all_question_lengths_ubuntu,all_question_lengths_android)
 
 # Given a set of hidden states in the neural net, and given a list of the question lengths, calculates
 # the mean hidden state for every question.
@@ -380,6 +380,8 @@ def train_model(use_lstm=True):
     get_id_to_text_android()
 
     embeddings = get_word_embeddings()
+    print "loaded word embeddings"
+
     '''
     model_Feature_Extractor = LSTMQA(embeddings) if use_lstm else CNN_Feature_Extractor(embeddings)
     if USE_GPU:
@@ -387,6 +389,7 @@ def train_model(use_lstm=True):
     '''
     model_Feature_Extractor = CNN_Feature_Extractor(embeddings)
     model_Domain_Classifier = NN_Domain_Classifier()
+    python "initialized networks"
 
     #domain classifier loss
     L_d_function = nn.MultiMarginLoss(margin=0.2) #binomial cross entropy loss
@@ -398,6 +401,7 @@ def train_model(use_lstm=True):
     orig_time = time()
 
     for epoch in range(NUM_EPOCHS):
+        python "starting first epoch"
         ubuntu_samples = get_training_data() # recalculate this every epoch to get new random selections
         android_samples = get_android_samples(len(ubuntu_samples))
         num_samples = 2*len(ubuntu_samples)
@@ -405,6 +409,7 @@ def train_model(use_lstm=True):
         num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
         total_loss = 0 # used for debugging
         for i in range(num_batches):
+            print "batch " + str(i)
             # Get the samples ready, 50% of samples from ubuntu and 50% from android
             batch_ubuntu = ubuntu_samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
             batch_android = android_samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
