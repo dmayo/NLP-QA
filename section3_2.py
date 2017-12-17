@@ -293,7 +293,7 @@ class DomainClassifier(nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = F.sigmoid(self.fc3(x))
         return x
 
 # Actually trains this thing
@@ -388,7 +388,7 @@ def train_model(use_lstm=True):
             #     evaluate_model(feature_extractor_model, use_lstm=use_lstm)
             # if i > 0 and i % 100 == 0:
                 # evaluate_model(model, use_lstm=use_lstm)
-        print_and_write("For epoch number " + str(epoch) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss))
+        print_and_write("For epoch number " + str(epoch) + " it has taken " + str(time() - orig_time) + " seconds and has label loss " + str(total_label_loss) + " and domain loss " + str(total_domain_loss))
         evaluate_model(feature_extractor_model, use_lstm=use_lstm)
         evaluate_model(feature_extractor_model, use_test_data=True, use_lstm=use_lstm)
         '''
