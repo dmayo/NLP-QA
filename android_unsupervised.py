@@ -5,6 +5,7 @@
 import numpy as np
 from meter import AUCMeter
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 from collections import defaultdict
 from scipy import sparse
 from sklearn.metrics.pairwise import cosine_similarity
@@ -62,10 +63,8 @@ if __name__ == '__main__':
     get_id_to_vector()
     meter = AUCMeter()
 
-    pos, neg = get_dev_data_android()
+    pos, neg = get_dev_data_android(use_test_data=False)
     # Only use questions that have at least one positive match
-    # print len(pos)
-    # num_pos = 0
     for main_qid in pos:
         main_vector = X[id_to_index[main_qid]]
         similiarities, targets = [], []
@@ -78,7 +77,4 @@ if __name__ == '__main__':
             similiarities.append(cosine(main_vector, X[id_to_index[neg_match_qid]]))
             targets.append(0)
         meter.add(np.array(similiarities), np.array(targets))
-        # num_pos += 1
-        # if num_pos % 100 == 0:
-        #     print "hello at " + str(num_pos)
     print "The AUC(0.05) value on the TfIdF weighted vectors are " + str(meter.value(0.05))
