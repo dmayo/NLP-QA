@@ -14,7 +14,7 @@ import random
 torch.manual_seed(1)
 random.seed(1)
 
-USE_GPU = True
+USE_GPU = False
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
 GPU_NUM=0 # sets which gpu to use
 
@@ -145,8 +145,8 @@ def get_dev_data_android(use_test_data=False):
 def get_tensor_from_batch(samples_ubuntu, samples_android, use_title=True):
     d_ubuntu = id_to_title_ubuntu if use_title else id_to_body_ubuntu
     d_android = id_to_title_android if use_title else id_to_body_android
-    all_question_lengths_ubuntu = np.vectorize(lambda x: len(d_ubuntu[x].split()))(samples.flatten())
-    all_question_lengths_android = np.vectorize(lambda x: len(d_android[x].split()))(samples.flatten())
+    all_question_lengths_ubuntu = np.vectorize(lambda x: len(d_ubuntu[x].split()))(samples_ubuntu.flatten())
+    all_question_lengths_android = np.vectorize(lambda x: len(d_android[x].split()))(samples_android.flatten())
     max_question_length = max(np.amax(all_question_lengths_ubuntu),np.amax(all_question_lengths_android))
     tensor = torch.zeros([max_question_length, BATCH_SIZE * len(samples_ubuntu[0])*2])
     if USE_GPU:
