@@ -388,9 +388,11 @@ def train_model(use_lstm=True):
         print_and_write("For epoch number " + str(epoch) + " it has taken " + str(time() - orig_time) + " seconds and has loss " + str(total_loss))
         evaluate_model(feature_extractor_model, use_lstm=use_lstm)
         evaluate_model(feature_extractor_model, use_test_data=True, use_lstm=use_lstm)
+        '''
         if SAVE_MODELS:
             save_checkpoint(epoch, model, optimizer, use_lstm)
-    return model
+        ''
+    #return model
 
 # Evaluates the model on the dev set data
 def evaluate_model(model, use_test_data=False, use_lstm=True):
