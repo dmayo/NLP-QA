@@ -13,13 +13,12 @@ from collections import defaultdict
 import numpy as np
 import math
 from time import time
-from section1 import LSTMQA, CNNQA
 from meter import AUCMeter
 
 torch.manual_seed(1)
 random.seed(1)
 
-USE_GPU = False
+USE_GPU = True
 
 TEXT_FILEPATH = "Android/corpus.tsv"
 DEV_FILEPATH_POS = "Android/dev.pos.txt"
@@ -27,11 +26,15 @@ DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH_POS = "Android/test.pos.txt"
 TEST_FILEPATH_NEG = "Android/test.neg.txt"
 EMBEDDINGS = "pruned_glove.txt"
-CHECKPOINT_FILENAME = "glove_lstm/epoch1.txt"
+CHECKPOINT_FILENAME = "glove_lstm/epoch_1.txt"
 OUTPUT = "transfer_learning.txt"
 
 BATCH_SIZE = 20
 EMBEDDING_DIM = 300
+LSTM_HIDDEN_DIM = 240
+CNN_HIDDEN_DIM = 667
+CNN_KERNEL_SIZE = 3
+DROPOUT = 0.1
 
 # GLOBAL DICTIONARIES FOR DATA PROCESSING
 id_to_title = {'0': ""} # keep a bogus mapping qid 0 -> empty string
@@ -58,15 +61,6 @@ def get_word_embeddings():
             embedding_list.append(map(float, splits[1:]))
             index += 1
     return np.array(embedding_list)
-
-# Saves the model in a file called lstm_models/epoch_0.txt
-def save_checkpoint(epoch, model, optimizer, use_lstm):
-    state = {
-        'state_dict': model.state_dict(),
-        'optimizer': optimizer.state_dict()
-    }
-    filename = ('lstm' if use_lstm else "cnn") + '_models_6/epoch_' + str(epoch) + ".txt"
-    torch.save(state, filename)
 
 def load_checkpoint(filename, model, optimizer):
     checkpoint = torch.load(filename)
@@ -138,6 +132,36 @@ def generate_score_matrix(title_encoding, body_encoding):
     # y.requires_grad = True
     return X, y
 
+class LSTMQA(nn.Module):
+    def __init__(self, pretrained_weight):
+        super(LSTMQA, self).__init__()
+
+        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda() if USE_GPU else torch.from_numpy(pretrained_weight)
+        self.embed.weight.data.copy_(pretrained_weight)
+        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
+
+        # Use LSTM_HIDDEN_DIM/2 because this is bidirectional
+        self.lstm = nn.LSTM(EMBEDDING_DIM, LSTM_HIDDEN_DIM / 2, bidirectional=True)
+        self.dropout = nn.Dropout(p=DROPOUT) 
+        self.hidden = self.init_hidden()
+
+    def init_hidden(self):
+        # The axes semantics are (num_layers, minibatch_size, hidden_dim)
+        if USE_GPU:
+            return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda()), 
+                    Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda()))
+        else:
+            return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2)), 
+                    Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2)))
+
+    def forward(self, sentence):
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
+        # returns a list of all the hidden states, is of shape (max_question_length, BATCH_SIZE * 22, LSTM_HIDDEN_DIM)
+        embeds = self.embed(sentence)
+        lstm_out, self.hidden = self.lstm(embeds, self.hidden)
+        return self.dropout(lstm_out)
+
 # Evaluates the model on the dev set data
 def evaluate_model(model, use_test_data=False, use_lstm=True):
     if use_test_data:
@@ -188,6 +212,8 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
         for j in range(1, 21):
             similarities.append(score_matrix[i][j])
             targets.append(0)
+    meter.add(similarities, targets)
+    print "The AUC(0.05) value is " + str(meter.value(0.05))
 
     # Set the model back to train mode
     model.train()
@@ -195,8 +221,9 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
 if __name__ == '__main__':
     get_id_to_text()
     embeddings = get_word_embeddings()
-    model = LSTMQA(embeddings) if use_lstm else CNNQA(embeddings)
+    model = LSTMQA(embeddings)
     optim = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()))
     load_checkpoint(CHECKPOINT_FILENAME, model, optim)
+    print "hello"
     evaluate_model(model)
 
