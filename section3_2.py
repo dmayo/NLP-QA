@@ -157,7 +157,7 @@ def get_tensor_from_batch(samples_ubuntu, samples_android, use_title=True):
     for q_index, q_id in enumerate(samples_android.flatten()):
         for word_index, word in enumerate(d_android[q_id].split()):
             tensor[word_index][BATCH_SIZE * len(samples_ubuntu[0])+q_index] = word_to_index[word]
-    return Variable(tensor.long()), all_question_lengths_ubuntu.concatenate(all_question_lengths_android)
+    return Variable(tensor.long()), all_question_lengths_ubuntu.append(all_question_lengths_android)
 
 # Given a set of hidden states in the neural net, and given a list of the question lengths, calculates
 # the mean hidden state for every question.
