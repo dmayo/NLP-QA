@@ -133,7 +133,7 @@ def get_tensor_from_batch_old(samples, use_title=True):
     max_question_length = np.amax(all_question_lengths)
     tensor = torch.zeros([max_question_length, BATCH_SIZE * 2 * len(samples[0])])
     if USE_GPU:
-        tensor = tensor.cuda()
+        tensor = tensor.cuda(GPU_NUM)
     for q_index, q_id in enumerate(samples.flatten()):
         for word_index, word in enumerate(d[q_id].split()):
             tensor[word_index][q_index] = word_to_index[word]
@@ -308,8 +308,8 @@ def train_model(use_lstm=True):
     feature_extractor_model = LSTMQA(embeddings) if use_lstm else CNNQA(embeddings)
     domain_classifier_model = DomainClassifier(LSTM_HIDDEN_DIM if use_lstm else CNN_HIDDEN_DIM)
     if USE_GPU:
-        feature_extractor_model.cuda()
-        domain_classifier_model.cuda()
+        feature_extractor_model.cuda(GPU_NUM)
+        domain_classifier_model.cuda(GPU_NUM)
     
     #domain classifier loss
     domain_loss_func = nn.BCELoss() # binomial cross entropy loss
@@ -362,7 +362,7 @@ def train_model(use_lstm=True):
 
             x = torch.cat([torch.zeros(BATCH_SIZE * 22), torch.ones(BATCH_SIZE * 22)])
             y = torch.cat([torch.ones(BATCH_SIZE * 22), torch.zeros(BATCH_SIZE * 22)])
-            is_android_target = Variable(torch.stack([x, y], dim=1).cuda() if USE_GPU else torch.stack([x, y], dim=1))
+            is_android_target = Variable(torch.stack([x, y], dim=1).cuda(GPU_NUM) if USE_GPU else torch.stack([x, y], dim=1))
 
             domain_loss = domain_loss_func(domain_class_output, is_android_target)
             total_domain_loss += domain_loss.data[0]
@@ -406,7 +406,7 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
     num_samples = len(samples)
 
     num_batches = int(math.ceil(1. * num_samples / (2 * BATCH_SIZE)))
-    score_matrix = torch.Tensor().cuda() if USE_GPU else torch.Tensor()
+    score_matrix = torch.Tensor().cuda(GPU_NUM) if USE_GPU else torch.Tensor()
     orig_time = time()
     for i in range(num_batches):
         # Get the samples ready
