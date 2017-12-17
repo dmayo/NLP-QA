@@ -41,8 +41,6 @@ LEARNING_RATE = 6e-4 # might change later
 WEIGHT_DECAY = 1e-5 # are we supposed to use this?
 NUM_EPOCHS = 15
 
-lambda1 = .5 # use schedule
-
 # -------------------------- DATA INPUT + PROCESSING ----------------------------------
 
 # GLOBAL DICTIONARIES FOR DATA PROCESSING
@@ -376,7 +374,7 @@ def train_model(use_lstm=True):
             # Compute loss, gradients, update parameters
             X, y = generate_score_matrix(mean_hidden_state[:BATCH_SIZE * 22])
 
-            label_loss = label_loss_func(X,y)
+            label_loss = label_loss_func(X, y)
             total_label_loss += label_loss.data[0]
 
             total_loss = label_loss - LAMBDA * domain_loss
@@ -462,4 +460,4 @@ if __name__ == '__main__':
     # Train our two models
     #train_model(use_lstm=True)
     #print_and_write("\n\n\n\n\n\n")
-    train_model(use_lstm=False)
+    train_model(use_lstm=True)
