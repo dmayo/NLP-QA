@@ -391,7 +391,7 @@ def train_model(use_lstm=True):
         '''
         if SAVE_MODELS:
             save_checkpoint(epoch, model, optimizer, use_lstm)
-        ''
+        '''
     #return model
 
 # Evaluates the model on the dev set data
