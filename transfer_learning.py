@@ -18,7 +18,7 @@ from meter import AUCMeter
 torch.manual_seed(1)
 random.seed(1)
 
-USE_GPU = True
+USE_GPU = False
 
 TEXT_FILEPATH = "Android/corpus.tsv"
 DEV_FILEPATH_POS = "Android/dev.pos.txt"
@@ -26,7 +26,7 @@ DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH_POS = "Android/test.pos.txt"
 TEST_FILEPATH_NEG = "Android/test.neg.txt"
 EMBEDDINGS = "pruned_glove.txt"
-CHECKPOINT_FILENAME = "glove_lstm/epoch_1.txt"
+CHECKPOINT_FILENAME = "glove_lstm/epoch_4.txt"
 OUTPUT = "transfer_learning.txt"
 
 BATCH_SIZE = 20
@@ -46,8 +46,8 @@ def get_id_to_text():
     with open(TEXT_FILEPATH, 'r') as f:
         for line in f.readlines():
             id, title, body = line.split("\t")
-            id_to_title[id] = title
-            id_to_body[id] = " ".join(body.split()[:100])
+            id_to_title[id] = title.lower()
+            id_to_body[id] = (" ".join(body.split()[:100])).lower()
 
 # Returns the numpy array embeddings, which is of shape (num_embeddings, EMBEDDING_DIM)
 # Sets the dictinoary word_to_index, where word_to_index[word] of some word returns the index within the embeddings numpy array
@@ -63,15 +63,9 @@ def get_word_embeddings():
     return np.array(embedding_list)
 
 def load_checkpoint(filename, model, optimizer):
-    checkpoint = torch.load(filename)
+    checkpoint = torch.load(filename, map_location=lambda storage, loc: storage)
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
-
-def print_and_write(text):
-    print text
-    with open(OUTPUT, "a") as f:
-        f.write(text)
-        f.write("\n")
 
 # Flatten the list of questions (main_q, +, -), (main_q, +, -), ... into a single list
 # We use BATCH_SIZE samples in a single batch, so this equates ot BATCH_SIZE * 22 questions in a single batch
@@ -90,6 +84,30 @@ def get_tensor_from_batch(samples, use_title=True):
         for word_index, word in enumerate(d[q_id].split()):
             tensor[word_index][q_index] = word_to_index[word]
     return Variable(tensor.long()), all_question_lengths
+
+# Given a set of hidden states in the neural net, and given a list of the question lengths, calculates
+# the mean hidden state for every question.
+# nn_out is of shape (max_question_length, BATCH_SIZE * 22, HIDDEN_DIM) for LSTMs
+# and is (BATCH_SIZE * 22, HIDDEN_DIM, max_question_length) for CNNs
+# question_lengths is a simple numpy array of length (BATCH_SIZE * 22)
+def get_encodings(nn_out, question_lengths, use_lstm=True):
+    # changes the dimensions to shape (BATCH_SIZE * 22, max_question_length, HIDDEN_DIM)
+    nn_out = nn_out.permute(1, 0, 2) if use_lstm else nn_out.permute(0, 2, 1)
+    HIDDEN_DIM = len(nn_out[0][0])
+    # Generate a mask of shape (BATCH_SIZE * 22, max_question_length, HIDDEN_DIM)
+    mask = torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM).cuda() if USE_GPU else torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM)
+    for q_index in range(len(question_lengths)):
+        length = question_lengths[q_index]
+        if length != 0:
+            mask[q_index][:length] = torch.ones(length, HIDDEN_DIM)
+    nn_out = nn_out * Variable(mask)
+
+    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM))
+    # mean_hidden_state.requires_grad = True
+    for q_index in range(len(nn_out)):
+        if question_lengths[q_index] != 0:
+            mean_hidden_state[q_index] = torch.sum(nn_out[q_index], 0) / question_lengths[q_index]
+    return mean_hidden_state
 
 # Returns the dev data in a numpy array, where each dev sample is of the format (q_id, pos_match, neg_match1, neg_match2, ..., neg_match20)
 # This numpy array has shape (num_dev_samples, 22)
@@ -165,9 +183,9 @@ class LSTMQA(nn.Module):
 # Evaluates the model on the dev set data
 def evaluate_model(model, use_test_data=False, use_lstm=True):
     if use_test_data:
-        print_and_write("Running evaluate on the TEST data:")
+        print "Running evaluate on the TEST data:"
     else:
-        print_and_write("Running evaluate on the DEV data:")
+        print "Running evaluate on the DEV data:"
     # Set the model to eval mode
     model.eval()
 
@@ -176,6 +194,8 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
     num_samples = len(samples)
 
     num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
+    score_matrix = torch.Tensor().cuda() if USE_GPU else torch.Tensor()
+    orig_time = time()
     for i in range(num_batches):
         # Get the samples ready
         batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
@@ -203,6 +223,8 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
         else:
             score_matrix = torch.cat([score_matrix, X])
 
+        print "Finished batch " + str(i) + " after " + str(time() - orig_time) + " seconds"
+
     # score_matrix is a shape (num_dev_samples, 21) matrix that contains the cosine similarity scores
     meter = AUCMeter()
     similarities, targets = [], []
@@ -212,7 +234,7 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
         for j in range(1, 21):
             similarities.append(score_matrix[i][j])
             targets.append(0)
-    meter.add(similarities, targets)
+    meter.add(np.array(similarities), np.array(targets))
     print "The AUC(0.05) value is " + str(meter.value(0.05))
 
     # Set the model back to train mode
@@ -224,6 +246,5 @@ if __name__ == '__main__':
     model = LSTMQA(embeddings)
     optim = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()))
     load_checkpoint(CHECKPOINT_FILENAME, model, optim)
-    print "hello"
-    evaluate_model(model)
+    evaluate_model(model, use_test_data=True)
 

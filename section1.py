@@ -16,24 +16,24 @@ random.seed(1)
 
 USE_GPU = True
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
-GPU_NUM=2 # sets which gpu to use
+GPU_NUM=0 # sets which gpu to use
 
 TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
-EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
+EMBEDDINGS = "pruned_glove.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
 TEST_FILEPATH = "askubuntu/test.txt"
-OUTPUT = "6_output_dropout_03_lr_1e3_actually03_4was01.txt"
+OUTPUT = "10_using_pruned_glove_lr_6e4_dropout_01.txt"
 
-BATCH_SIZE = 20
-EMBEDDING_DIM = 200
+BATCH_SIZE = 40
+EMBEDDING_DIM = 300
 LSTM_HIDDEN_DIM = 240
 CNN_HIDDEN_DIM = 667
 CNN_KERNEL_SIZE = 3
-DROPOUT = 0.3
+DROPOUT = 0.1
 
 #LEARNING_RATE = 6e-4 # might change later
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 6e-4
 WEIGHT_DECAY = 1e-5 # are we supposed to use this?
 NUM_EPOCHS = 15
 
@@ -55,7 +55,7 @@ def get_id_to_text():
 # Returns the numpy array embeddings, which is of shape (num_embeddings, EMBEDDING_DIM)
 # Sets the dictinoary word_to_index, where word_to_index[word] of some word returns the index within the embeddings numpy array
 def get_word_embeddings():
-    embedding_list = [[0] * 200] # set the zero vector for UNK or PADDING
+    embedding_list = [[0] * EMBEDDING_DIM] # set the zero vector for UNK or PADDING
     index = 1
     with open(EMBEDDINGS, 'r') as f:
         for line in f.readlines():
@@ -93,7 +93,7 @@ def get_tensor_from_batch(samples, use_title=True):
     max_question_length = np.amax(all_question_lengths)
     tensor = torch.zeros([max_question_length, BATCH_SIZE * len(samples[0])])
     if USE_GPU:
-        tensor = tensor.cuda()
+        tensor = tensor.cuda(GPU_NUM)
     for q_index, q_id in enumerate(samples.flatten()):
         for word_index, word in enumerate(d[q_id].split()):
             tensor[word_index][q_index] = word_to_index[word]
@@ -109,14 +109,14 @@ def get_encodings(nn_out, question_lengths, use_lstm=True):
     nn_out = nn_out.permute(1, 0, 2) if use_lstm else nn_out.permute(0, 2, 1)
     HIDDEN_DIM = len(nn_out[0][0])
     # Generate a mask of shape (BATCH_SIZE * 22, max_question_length, HIDDEN_DIM)
-    mask = torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM).cuda() if USE_GPU else torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM)
+    mask = torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM).cuda(GPU_NUM) if USE_GPU else torch.zeros(BATCH_SIZE * 22, len(nn_out[0]), HIDDEN_DIM)
     for q_index in range(len(question_lengths)):
         length = question_lengths[q_index]
         if length != 0:
             mask[q_index][:length] = torch.ones(length, HIDDEN_DIM)
     nn_out = nn_out * Variable(mask)
 
-    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM))
+    mean_hidden_state = Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM).cuda(GPU_NUM)) if USE_GPU else Variable(torch.zeros(BATCH_SIZE * 22, HIDDEN_DIM))
     # mean_hidden_state.requires_grad = True
     for q_index in range(len(nn_out)):
         if question_lengths[q_index] != 0:
@@ -129,7 +129,7 @@ def save_checkpoint(epoch, model, optimizer, use_lstm):
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict()
     }
-    filename = ('lstm' if use_lstm else "cnn") + '_models_6/epoch_' + str(epoch) + ".txt"
+    filename = 'glove_' + ('lstm' if use_lstm else "cnn") + '/epoch_' + str(epoch) + ".txt"
     torch.save(state, filename)
 
 def load_checkpoint(filename, model, optimizer):
@@ -176,12 +176,12 @@ def generate_score_matrix(title_encoding, body_encoding):
     # mean_hidden_state.requires_grad = True
 
     cos = nn.CosineSimilarity(dim=0)
-    X = Variable(torch.zeros(BATCH_SIZE, 21).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE, 21))
+    X = Variable(torch.zeros(BATCH_SIZE, 21).cuda(GPU_NUM)) if USE_GPU else Variable(torch.zeros(BATCH_SIZE, 21))
     # X.requires_grad = True
     for i in range(BATCH_SIZE):
         for j in range(21):
             X[i, j] = cos(mean_hidden_state[22 * i], mean_hidden_state[22 * i + j + 1])
-    y = Variable(torch.zeros(BATCH_SIZE).long().cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE).long())
+    y = Variable(torch.zeros(BATCH_SIZE).long().cuda(GPU_NUM)) if USE_GPU else Variable(torch.zeros(BATCH_SIZE).long())
     # y.requires_grad = True
     return X, y
 
@@ -228,7 +228,7 @@ class LSTMQA(nn.Module):
         super(LSTMQA, self).__init__()
 
         self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
-        pretrained_weight = torch.from_numpy(pretrained_weight).cuda() if USE_GPU else torch.from_numpy(pretrained_weight)
+        pretrained_weight = torch.Tensor(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.Tensor(pretrained_weight)
         self.embed.weight.data.copy_(pretrained_weight)
         self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
 
@@ -240,8 +240,8 @@ class LSTMQA(nn.Module):
     def init_hidden(self):
         # The axes semantics are (num_layers, minibatch_size, hidden_dim)
         if USE_GPU:
-            return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda()), 
-                    Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda()))
+            return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda(GPU_NUM)), 
+                    Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2).cuda(GPU_NUM)))
         else:
             return (Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2)), 
                     Variable(torch.zeros(2, BATCH_SIZE * 22, LSTM_HIDDEN_DIM / 2)))
@@ -258,7 +258,7 @@ class CNNQA(nn.Module):
         super(CNNQA, self).__init__()
 
         self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
-        pretrained_weight = torch.from_numpy(pretrained_weight).cuda() if USE_GPU else torch.from_numpy(pretrained_weight)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
         self.embed.weight.data.copy_(pretrained_weight)
         self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
         
@@ -289,7 +289,7 @@ def train_model(use_lstm=True):
     embeddings = get_word_embeddings()
     model = LSTMQA(embeddings) if use_lstm else CNNQA(embeddings)
     if USE_GPU:
-        model.cuda()
+        model.cuda(GPU_NUM)
     loss_function = nn.MultiMarginLoss(margin=0.2) # TODO: what about size_average?
     optimizer = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
@@ -357,7 +357,7 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
     num_samples = len(samples)
 
     num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
-    score_matrix = torch.Tensor().cuda() if USE_GPU else torch.Tensor()
+    score_matrix = torch.Tensor().cuda(GPU_NUM) if USE_GPU else torch.Tensor()
     for i in range(num_batches):
         # Get the samples ready
         batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
@@ -379,7 +379,7 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
 
         # Compute evaluation
         X, _ = generate_score_matrix(title_encoding, body_encoding)
-        X = torch.index_select(X.data, 1, torch.arange(0, 20).long().cuda() if USE_GPU else torch.arange(0,20).long()) # convert to tensor, throw out last bogus question
+        X = torch.index_select(X.data, 1, torch.arange(0, 20).long().cuda(GPU_NUM) if USE_GPU else torch.arange(0,20).long()) # convert to tensor, throw out last bogus question
         if i == num_batches - 1 and num_samples % BATCH_SIZE != 0:
             score_matrix = torch.cat([score_matrix, X[:num_samples - i * BATCH_SIZE]])
         else:
