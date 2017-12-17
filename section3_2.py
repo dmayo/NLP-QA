@@ -37,6 +37,8 @@ LEARNING_RATE = 6e-4 # might change later
 WEIGHT_DECAY = 1e-5 # are we supposed to use this?
 NUM_EPOCHS = 15
 
+lambda1 = .5 # use schedule
+
 # -------------------------- DATA INPUT + PROCESSING ----------------------------------
 
 # GLOBAL DICTIONARIES FOR DATA PROCESSING
