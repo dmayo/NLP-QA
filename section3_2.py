@@ -328,7 +328,7 @@ class GRL(torch.autograd.Function):
 
 class CNN_Feature_Extractor(nn.Module):
     def __init__(self, pretrained_weight):
-        super(CNNQA, self).__init__()
+        super(CNN_Feature_Extractor, self).__init__()
 
         self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
         pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
@@ -355,7 +355,7 @@ class CNN_Feature_Extractor(nn.Module):
 # x->1024->1024->2
 class NN_Domain_Classifier(nn.Module):
     def __init__(self,):
-        super(CNNQA, self).__init__()
+        super(NN_Domain_Classifier, self).__init__()
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
