@@ -26,8 +26,9 @@ DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH_POS = "Android/test.pos.txt"
 TEST_FILEPATH_NEG = "Android/test.neg.txt"
 EMBEDDINGS = "pruned_glove.txt"
-CHECKPOINT_FILENAME = "glove_lstm/epoch_6.txt"
+CHECKPOINT_FILENAME = "glove_lstm/epoch_14.txt"
 OUTPUT = "transfer_learning.txt"
+USE_LSTM = True
 
 BATCH_SIZE = 20
 EMBEDDING_DIM = 300
@@ -147,6 +148,31 @@ def generate_score_matrix(title_encoding, body_encoding):
     y = Variable(torch.zeros(BATCH_SIZE).long().cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE).long())
     return X, y
 
+class CNNQA(nn.Module):
+    def __init__(self, pretrained_weight):
+        super(CNNQA, self).__init__()
+
+        self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
+        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
+        self.embed.weight.data.copy_(pretrained_weight)
+        self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
+        
+        self.cnn = nn.Conv1d(EMBEDDING_DIM, CNN_HIDDEN_DIM, CNN_KERNEL_SIZE, padding=(CNN_KERNEL_SIZE - 1) / 2)
+        self.dropout = nn.Dropout(p=DROPOUT)
+        self.hidden = None # doesn't actually matter, used for consistentcy between the two models
+
+    def init_hidden(self):
+        pass
+
+    def forward(self, sentence):
+        # sentence is a Variable of a LongVector of shape (max_sentence_length, BATCH_SIZE * 22)
+        # returns a list of all the hidden states, is of shape ()
+        embeds = self.embed(sentence) # currently shape (max_question_length, BATCH_SIZE * 22, EMBEDDING_DIM)
+        embeds = embeds.permute(1, 2, 0) # now (BATCH_SIZE * 22, EMBEDDING_DIM, max_question_length)
+
+        cnn_out = self.cnn(embeds) # shape (BATCH_SIZE * 22, CNN_HIDDEN_DIM, max_question_length)
+        return self.dropout(cnn_out)
+
 class LSTMQA(nn.Module):
     def __init__(self, pretrained_weight):
         super(LSTMQA, self).__init__()
@@ -220,7 +246,7 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
         else:
             score_matrix = torch.cat([score_matrix, X])
 
-        print "Finished batch " + str(i) + " after " + str(time() - orig_time) + " seconds"
+        #print "Finished batch " + str(i) + " after " + str(time() - orig_time) + " seconds"
 
     # score_matrix is a shape (num_dev_samples, 21) matrix that contains the cosine similarity scores
     meter = AUCMeter()
@@ -240,8 +266,8 @@ def evaluate_model(model, use_test_data=False, use_lstm=True):
 if __name__ == '__main__':
     get_id_to_text()
     embeddings = get_word_embeddings()
-    model = LSTMQA(embeddings)
+    model = LSTMQA(embeddings) if USE_LSTM else CNNQA(embeddings)
     optim = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()))
     load_checkpoint(CHECKPOINT_FILENAME, model, optim)
-    evaluate_model(model, use_test_data=True)
-
+    evaluate_model(model, use_test_data=True, use_lstm=USE_LSTM)
+    evaluate_model(model, use_test_data=False, use_lstm=USE_LSTM)

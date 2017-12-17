@@ -15,7 +15,7 @@ from meter import AUCMeter
 torch.manual_seed(1)
 random.seed(1)
 
-USE_GPU = False
+USE_GPU = True
 SAVE_MODELS = False # stores the models in lstm_models/epoch_0.txt
 GPU_NUM=0 # sets which gpu to use
 USE_LESS_TRAINING_DATA = True
@@ -360,9 +360,7 @@ def train_model(use_lstm=True):
             total_label_loss += label_loss.data[0]
 
             total_loss = label_loss + LAMBDA * hidden_loss
-            print "Got here and has been " + str(time() - orig_time)
             total_loss.backward()
-            print "Got here2 and has been " + str(time() - orig_time)
             label_optim.step()
 
             # every so while, check the dev accuracy
