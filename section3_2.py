@@ -9,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 import math
 from time import time
-import gc
+import random
 
 torch.manual_seed(1)
 random.seed(1)
@@ -18,7 +18,8 @@ USE_GPU = True
 SAVE_MODELS = True # stores the models in lstm_models/epoch_0.txt
 GPU_NUM=0 # sets which gpu to use
 
-TEXT_FILEPATH = "askubuntu/text_tokenized.txt"
+TEXT_FILEPATH_UBUNTU = "askubuntu/text_tokenized.txt"
+TEXT_FILEPATH_ANDROID = "askubuntu/text_tokenized.txt"
 TRAIN_FILEPATH = "askubuntu/train_random.txt"
 EMBEDDINGS = "askubuntu/vector/vectors_pruned.200.txt"
 DEV_FILEPATH = "askubuntu/dev.txt"
@@ -26,7 +27,7 @@ TEST_FILEPATH = "askubuntu/test.txt"
 OUTPUT = "output.txt"
 
 BATCH_SIZE = 20
-EMBEDDING_DIM = 200
+EMBEDDING_DIM = 300
 LSTM_HIDDEN_DIM = 240
 CNN_HIDDEN_DIM = 667
 CNN_KERNEL_SIZE = 3
@@ -39,22 +40,36 @@ NUM_EPOCHS = 15
 # -------------------------- DATA INPUT + PROCESSING ----------------------------------
 
 # GLOBAL DICTIONARIES FOR DATA PROCESSING
-id_to_title = {'0': ""} # keep a bogus mapping qid 0 -> empty string
-id_to_body = {'0': ""}
+id_to_title_ubuntu = {'0': ""} # keep a bogus mapping qid 0 -> empty string
+id_to_body_ubuntu = {'0': ""}
+id_to_title_android = {'0': ""} # keep a bogus mapping qid 0 -> empty string
+id_to_body_android = {'0': ""}
 word_to_index = defaultdict(lambda: 0) # by default, return 0, which corresponds to UNK or PAD and has embedding the zero vector
 
-# Sets the dictionary id_to_title and id_to_body
-def get_id_to_text():
-    with open(TEXT_FILEPATH, 'r') as f:
+id_to_index = {} # maps question ID to the index in the sparse Tf-idf weighted matrix
+X = None # the sparse Tf-idf weighted matrix of shape (num_samples, num_features)
+
+# Sets the dictionary id_to_title_ubuntu and id_to_body_ubuntu
+def get_id_to_text_ubuntu():
+    with open(TEXT_FILEPATH_UBUNTU, 'r') as f:
         for line in f.readlines():
             id, title, body = line.split("\t")
-            id_to_title[id] = title
-            id_to_body[id] = " ".join(body.split()[:100])
+            id_to_title_ubuntu[id] = title
+            id_to_body_ubuntu[id] = " ".join(body.split()[:100])
+
+# Sets the dictionary id_to_title and id_to_body
+def get_id_to_text_android():
+    with open(TEXT_FILEPATH_ANDROID, 'r') as f:
+        for line in f.readlines():
+            id, title, body = line.split("\t")
+            id_to_title_android[id] = title
+            id_to_body_android[id] = " ".join(body.split()[:100])
+
 
 # Returns the numpy array embeddings, which is of shape (num_embeddings, EMBEDDING_DIM)
 # Sets the dictinoary word_to_index, where word_to_index[word] of some word returns the index within the embeddings numpy array
 def get_word_embeddings():
-    embedding_list = [[0] * 200] # set the zero vector for UNK or PADDING
+    embedding_list = [[0] * 300] # set the zero vector for UNK or PADDING
     index = 1
     with open(EMBEDDINGS, 'r') as f:
         for line in f.readlines():
@@ -64,7 +79,7 @@ def get_word_embeddings():
             index += 1
     return np.array(embedding_list)
 
-# Returns all samples of training data
+# Returns all samples of ubuntu training data
 # The data is provided in the format (original_question), (LIST of positive_matches), (100 RANDOM negative_matches)
 # For EACH original_question <-> positive_match pair, get 20 random negative samples
 # RETURNS: a numpy array of training samples, where each training sample is of the format (q_id, pos_match, neg_match1, neg_match2, ..., neg_match20)
@@ -80,23 +95,69 @@ def get_training_data():
                 samples.append([id, pos_match] + random.sample(all_neg_matches, 20))
     return np.array(samples)
 
+def get_android_samples(numSamples):
+    samples = []
+    for i in range(numSamples):
+        samples.append(random.sample(id_to_title_android.keys(),22))
+    return np.array(samples)
+
+
+# Maps a question ID to the title concatenated with the body
+# no limits on body length (as of yet)
+def get_id_to_vector():
+    global X
+    all_questions = []
+    index = 0
+    with open(TEXT_FILEPATH, 'r') as f:
+        for line in f:
+            id, title, body = line[:-1].split("\t")
+            all_questions.append(title + ' ' + body)
+            id_to_index[id] = index
+            index += 1
+    vec = TfidfVectorizer()
+    X = vec.fit_transform(all_questions)
+
+# Creates the two dictionaries pos and neg
+# pos[main_qid] maps to a set containing all positive matches to the main question ID
+# neg does the same thing for negative matches
+def get_dev_data_android(use_test_data=False):
+    filepath_pos = TEST_FILEPATH_POS if use_test_data else DEV_FILEPATH_POS
+    filepath_neg = TEST_FILEPATH_NEG if use_test_data else DEV_FILEPATH_NEG
+    pos = defaultdict(lambda: set())
+    neg = defaultdict(lambda: set())
+    with open(filepath_pos, 'r') as f:
+        for line in f.readlines():
+            main_qid, candidate_qid = line.split()
+            pos[main_qid].add(candidate_qid)
+    with open(filepath_neg, 'r') as f:
+        for line in f.readlines():
+            main_qid, candidate_qid = line.split()
+            neg[main_qid].add(candidate_qid)
+    return pos, neg
+
+
 # Flatten the list of questions (main_q, +, -), (main_q, +, -), ... into a single list
 # We use BATCH_SIZE samples in a single batch, so this equates ot BATCH_SIZE * 22 questions in a single batch
 # Inputs to the neural net are of the shape (max_question_length x BATCH_SIZE * 22)
 # Pad missing questions with the 0 index (which corresponds to PAD or UNK)
 # PARAMETERS: a list of BATCH_SIZE training samples, where each training sample is of the format (q_id, pos_match, neg_match1, neg_match2, ...)
 # RETURNS: a Variable that we feed into the neural net, AND returns the numpy array of all question lengths (of length BATCH_SIZE * 22)
-def get_tensor_from_batch(samples, use_title=True):
-    d = id_to_title if use_title else id_to_body
-    all_question_lengths = np.vectorize(lambda x: len(d[x].split()))(samples.flatten())
-    max_question_length = np.amax(all_question_lengths)
-    tensor = torch.zeros([max_question_length, BATCH_SIZE * len(samples[0])])
+def get_tensor_from_batch(samples_ubuntu, samples_android, use_title=True):
+    d_ubuntu = id_to_title_ubuntu if use_title else id_to_body_ubuntu
+    d_android = id_to_title_android if use_title else id_to_body_android
+    all_question_lengths_ubuntu = np.vectorize(lambda x: len(d_ubuntu[x].split()))(samples.flatten())
+    all_question_lengths_android = np.vectorize(lambda x: len(d_android[x].split()))(samples.flatten())
+    max_question_length = max(np.amax(all_question_lengths_ubuntu),np.amax(all_question_lengths_android))
+    tensor = torch.zeros([max_question_length, BATCH_SIZE * len(samples_ubuntu[0])*2])
     if USE_GPU:
         tensor = tensor.cuda(GPU_NUM)
-    for q_index, q_id in enumerate(samples.flatten()):
-        for word_index, word in enumerate(d[q_id].split()):
+    for q_index, q_id in enumerate(samples_ubuntu.flatten()):
+        for word_index, word in enumerate(d_ubuntu[q_id].split()):
             tensor[word_index][q_index] = word_to_index[word]
-    return Variable(tensor.long()), all_question_lengths
+    for q_index, q_id in enumerate(samples_android.flatten()):
+        for word_index, word in enumerate(d_android[q_id].split()):
+            tensor[word_index][BATCH_SIZE * len(samples_ubuntu[0])+q_index] = word_to_index[word]
+    return Variable(tensor.long()), all_question_lengths_ubuntu.concatenate(all_question_lengths_android)
 
 # Given a set of hidden states in the neural net, and given a list of the question lengths, calculates
 # the mean hidden state for every question.
@@ -220,6 +281,13 @@ def evaluate_score_matrix_and_print(score_matrix, is_correct):
     print_and_write("P@1 score is " + str(p_at_1_total / num_samples))
     print_and_write("P@5 score is " + str(p_at_5_total / num_samples))
 
+def get_training_part(mean_hidden_state,y_d):
+    out=[]
+    for i in range(y_d):
+        if(y_d[i]==0):
+            out.append(mean_hidden_state[i])
+    return torch.FloatTensor(out)
+
 # -------------------------- MODEL DEFINITIONS ----------------------------------
 
 class LSTMQA(nn.Module):
@@ -328,22 +396,25 @@ def train_model(use_lstm=True):
     orig_time = time()
 
     for epoch in range(NUM_EPOCHS):
-        samples = get_training_data() # recalculate this every epoch to get new random selections
-        num_samples = len(samples)
+        ubuntu_samples = get_training_data() # recalculate this every epoch to get new random selections
+        android_samples = get_android_samples(len(ubuntu_samples))
+        num_samples = 2*len(ubuntu_samples)
 
         num_batches = int(math.ceil(1. * num_samples / BATCH_SIZE))
         total_loss = 0 # used for debugging
         for i in range(num_batches):
-            # Get the samples ready
-            batch = samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
+            # Get the samples ready, 50% of samples from ubuntu and 50% from android
+            batch_ubuntu = ubuntu_samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
+            batch_android = android_samples[i * BATCH_SIZE: (i+1) * BATCH_SIZE]
             # If this is the last batch, then need to pad the batch to get the same shape as expected
             if i == num_batches - 1 and num_samples % BATCH_SIZE != 0:
-                batch = np.concatenate((batch, np.full(((i+1) * BATCH_SIZE - num_samples, 22), "0")), axis=0)
+                batch_ubuntu = np.concatenate((batch_ubuntu, np.full(((i+1) * BATCH_SIZE - num_samples, 22), "0")), axis=0)
+                batch_android = np.concatenate((batch_android, np.full(((i+1) * BATCH_SIZE - num_samples, 22), "0")), axis=0)
 
             ########### Set up the feature extractor network ###########
             # Convert from numpy arrays to tensors
-            title_tensor, title_lengths = get_tensor_from_batch(batch, use_title=True)
-            body_tensor, body_lengths = get_tensor_from_batch(batch, use_title=False)
+            title_tensor, title_lengths = get_tensor_from_batch(batch_ubuntu, batch_android, use_title=True)
+            body_tensor, body_lengths = get_tensor_from_batch(batch_ubuntu, batch_android, use_title=False)
 
             # Reset the model
             optimizer_L_d.zero_grad() # where should these be reset?
@@ -362,16 +433,18 @@ def train_model(use_lstm=True):
 
             model_Domain_Classifier.hidden = model_Domain_classifier.init_hidden()
             Domain_Classifier_hidden=model_Domain_Classifier(mean_hidden_state)
-  
-            L_d_loss = L_d_function(Domain_Classifier_hidden,y_d) # get y_d from somewhere?
+
+            y_d = torch.zeros(BATCH_SIZE/2).concat(torch.ones(BATCH_SIZE/2))
+
+            L_d_loss = L_d_function(Domain_Classifier_hidden,y_d)
             total_L_d_loss += L_d_loss.data[0]
 
 
 
             ########### Set up the label predictor network ###########
-
+            mean_hidden_state_training = get_training_part(mean_hidden_state,y_d)
             # Compute loss, gradients, update parameters
-            X_y, y_y = generate_score_matrix(mean_hidden_state)
+            X_y, y_y = generate_score_matrix(mean_hidden_state_training)
 
             L_y_loss = L_y_function(X_y,y_y)
             total_L_y_loss += L_y_loss.data[0]
