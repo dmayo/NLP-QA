@@ -26,7 +26,7 @@ DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH_POS = "Android/test.pos.txt"
 TEST_FILEPATH_NEG = "Android/test.neg.txt"
 EMBEDDINGS = "pruned_glove.txt"
-CHECKPOINT_FILENAME = "glove_lstm/epoch_1.txt"
+CHECKPOINT_FILENAME = "glove_lstm/epoch_4.txt"
 OUTPUT = "transfer_learning.txt"
 
 BATCH_SIZE = 20
@@ -46,8 +46,8 @@ def get_id_to_text():
     with open(TEXT_FILEPATH, 'r') as f:
         for line in f.readlines():
             id, title, body = line.split("\t")
-            id_to_title[id] = title
-            id_to_body[id] = " ".join(body.split()[:100])
+            id_to_title[id] = title.lower()
+            id_to_body[id] = (" ".join(body.split()[:100])).lower()
 
 # Returns the numpy array embeddings, which is of shape (num_embeddings, EMBEDDING_DIM)
 # Sets the dictinoary word_to_index, where word_to_index[word] of some word returns the index within the embeddings numpy array
@@ -246,5 +246,5 @@ if __name__ == '__main__':
     model = LSTMQA(embeddings)
     optim = optim.Adam(filter(lambda x: x.requires_grad, model.parameters()))
     load_checkpoint(CHECKPOINT_FILENAME, model, optim)
-    evaluate_model(model)
+    evaluate_model(model, use_test_data=True)
 
