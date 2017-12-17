@@ -89,6 +89,8 @@ def get_word_embeddings():
 # This numpy array has shape (num_training_samples, 22)
 def get_training_data():
     samples = []
+    count=0
+    limit=2000
     with open(TRAIN_FILEPATH, 'r') as f:
         for line in f.readlines():
             id, pos, neg = line.split("\t")
@@ -96,6 +98,9 @@ def get_training_data():
             all_neg_matches = neg.split()
             for pos_match in all_pos_matches:
                 samples.append([id, pos_match] + random.sample(all_neg_matches, 20))
+            count+=1
+            if(count>=limit):
+                break
     return np.array(samples)
 
 def get_android_samples(numSamples):
