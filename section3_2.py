@@ -376,7 +376,9 @@ def train_model(use_lstm=True):
     else:
         print_and_write("Training the CNN model with the GPU:" if USE_GPU else "Training the CNN model")
 
-    get_id_to_text()
+    get_id_to_text_ubuntu()
+    get_id_to_text_android()
+
     embeddings = get_word_embeddings()
     '''
     model_Feature_Extractor = LSTMQA(embeddings) if use_lstm else CNN_Feature_Extractor(embeddings)
