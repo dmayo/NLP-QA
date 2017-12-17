@@ -389,7 +389,7 @@ def train_model(use_lstm=True):
     '''
     model_Feature_Extractor = CNN_Feature_Extractor(embeddings)
     model_Domain_Classifier = NN_Domain_Classifier()
-    python "initialized networks"
+    print "initialized networks"
 
     #domain classifier loss
     L_d_function = nn.MultiMarginLoss(margin=0.2) #binomial cross entropy loss
@@ -401,7 +401,7 @@ def train_model(use_lstm=True):
     orig_time = time()
 
     for epoch in range(NUM_EPOCHS):
-        python "starting first epoch"
+        print "starting first epoch"
         ubuntu_samples = get_training_data() # recalculate this every epoch to get new random selections
         android_samples = get_android_samples(len(ubuntu_samples))
         num_samples = 2*len(ubuntu_samples)
