@@ -26,7 +26,7 @@ DEV_FILEPATH_NEG = "Android/dev.neg.txt"
 TEST_FILEPATH_POS = "Android/test.pos.txt"
 TEST_FILEPATH_NEG = "Android/test.neg.txt"
 EMBEDDINGS = "pruned_glove.txt"
-CHECKPOINT_FILENAME = "glove_lstm/epoch_4.txt"
+CHECKPOINT_FILENAME = "glove_lstm/epoch_6.txt"
 OUTPUT = "transfer_learning.txt"
 
 BATCH_SIZE = 20
@@ -138,16 +138,13 @@ def get_dev_data_android(use_test_data=False):
 # y is just an all-zero vector of size (BATCH_SIZE)
 def generate_score_matrix(title_encoding, body_encoding):
     mean_hidden_state = (title_encoding + body_encoding) / 2.
-    # mean_hidden_state.requires_grad = True
-
+    
     cos = nn.CosineSimilarity(dim=0)
     X = Variable(torch.zeros(BATCH_SIZE, 21).cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE, 21))
-    # X.requires_grad = True
     for i in range(BATCH_SIZE):
         for j in range(21):
             X[i, j] = cos(mean_hidden_state[22 * i], mean_hidden_state[22 * i + j + 1])
     y = Variable(torch.zeros(BATCH_SIZE).long().cuda()) if USE_GPU else Variable(torch.zeros(BATCH_SIZE).long())
-    # y.requires_grad = True
     return X, y
 
 class LSTMQA(nn.Module):
