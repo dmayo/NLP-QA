@@ -331,7 +331,7 @@ class CNN_Feature_Extractor(nn.Module):
         super(CNN_Feature_Extractor, self).__init__()
 
         self.embed = nn.Embedding(len(pretrained_weight), EMBEDDING_DIM)
-        pretrained_weight = torch.from_numpy(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.from_numpy(pretrained_weight)
+        pretrained_weight = torch.Tensor(pretrained_weight).cuda(GPU_NUM) if USE_GPU else torch.Tensor(pretrained_weight)
         self.embed.weight.data.copy_(pretrained_weight)
         self.embed.weight.requires_grad = False # may make this better, not really sure. Using this would require parameters = filter(lambda p: p.requires_grad, net.parameters())
         
